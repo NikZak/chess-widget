@@ -1,7 +1,7 @@
-<!-- Example with Russian (default) -->
+<!-- Example with 2 puzzles (Russian) -->
 <iframe
   id="chess-widget"
-  src="index.html?fen=r3k2r/1b1p1pp1/3qp3/p1bP4/Pp3B2/6P1/1PP1QPB1/R4RK1%20b%20kq%20-%200%201&moves=d6d5,g2d5,b7d5&lang=ru"
+  src="https://chess-widget-sable.vercel.app/?puzzles=r3k2r/1b1p1pp1/3qp3/p1bP4/Pp3B2/6P1/1PP1QPB1/R4RK1%20b%20kq%20-%200%201|d6d5,g2d5,b7d5,a1d1,h8h1|Найдите%20выигрывающую%20комбинацию;3n3r/2p3k1/1pbbpRpp/6r1/3P4/2PBQ2P/q5P1/5RK1%20w%20-%20-%200%201|e3g5,h6g5,f6g6,g7h7,g6e6,h7g7,e6g6,g7h7,g6d6,h7g7,d6g6,g7h7,g6c6,h7g7,c6g6,g7h7,g6b6,h7g7,b6g6,g7h7,g6a6,h7g7,a6a2|Найдите%20выигрывающую%20комбинацию&lang=ru"
   width="100%"
   height="500"
   style="border: none; max-width: 500px"
@@ -21,9 +21,7 @@
     // Listen for puzzle solved event
     if (event.data && event.data.type === "CHESS_PUZZLE_SOLVED") {
       console.log("Puzzle solved!", event.data);
-      alert(
-        "Congratulations! You solved puzzle #" + (event.data.puzzleIndex + 1)
-      );
+      alert("Поздравляем! Вы решили задачу #" + (event.data.puzzleIndex + 1));
       // Here you can redirect or show hidden content
     }
   });
