@@ -72,7 +72,11 @@
 
       const solution = puzzleData.moves.split(",").map((m) => m.trim());
       const tempGame = new Chess(puzzleData.fen);
-      const orientation = tempGame.turn() === "w" ? "white" : "black";
+      // Determine orientation directly from FEN string: extract turn indicator (w/b) after board position
+      // FEN format: "board position" "turn" "castling" "en passant" "halfmove" "fullmove"
+      const fenParts = puzzleData.fen.split(/\s+/);
+      const turnFromFen = fenParts[1] || tempGame.turn(); // Fallback to chess.js if FEN parsing fails
+      const orientation = turnFromFen === "w" ? "white" : "black";
 
       const puzzleState = {
         id: puzzleId,
@@ -113,6 +117,22 @@
 
       puzzleState.board.initialized
         .then(() => {
+          // Explicitly set orientation after initialization to ensure it's applied
+          if (puzzleState.board.setOrientation) {
+            // Use COLOR constants if available, otherwise use string values
+            const orientationValue = window.COLOR
+              ? orientation === "white"
+                ? window.COLOR.white
+                : window.COLOR.black
+              : orientation;
+            puzzleState.board.setOrientation(orientationValue);
+            console.log(
+              "Set orientation to",
+              orientation,
+              "for puzzle",
+              puzzleId
+            );
+          }
           enablePlayerInput(index);
         })
         .catch((err) => {
