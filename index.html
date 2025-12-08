@@ -23,13 +23,23 @@
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           Helvetica, Arial, sans-serif;
         background-color: #f4f4f4;
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      .puzzles-container {
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        height: 100vh;
-        margin: 0;
-        overflow: hidden;
+        gap: 30px;
+        padding: 20px;
+        width: 100%;
+        max-width: 1200px;
+        box-sizing: border-box;
+        margin: 0 auto;
       }
 
       .widget-container {
@@ -41,6 +51,14 @@
         max-width: 450px;
         text-align: center;
         box-sizing: border-box;
+      }
+
+      .puzzle-instruction {
+        font-size: 0.9rem;
+        color: #34495e;
+        margin-bottom: 10px;
+        font-weight: 500;
+        min-height: 1.2em;
       }
 
       #board {
@@ -94,6 +112,10 @@
 
       /* Responsive design for mobile devices */
       @media (max-width: 480px) {
+        .puzzles-container {
+          padding: 10px;
+          gap: 20px;
+        }
         .widget-container {
           padding: 10px;
           box-shadow: none;
@@ -103,11 +125,8 @@
     </style>
   </head>
   <body>
-    <div class="widget-container">
-      <div id="status" class="status-message status-neutral">
-        <!-- Status will be set by JavaScript -->
-      </div>
-      <div id="board"></div>
+    <div class="puzzles-container" id="puzzles-container">
+      <!-- Puzzles will be dynamically inserted here -->
     </div>
 
     <script>
@@ -138,100 +157,200 @@
 
       /**
        * CONFIGURATION AND STATE
-       * Main object for storing widget state
+       * Array of puzzle states - each puzzle has its own state
        */
-      const PuzzleState = {
-        game: null, // Chess.js logic object
-        board: null, // Chessboard.js UI object
-        solution: [], // Array of correct moves (strings like 'e2e4')
-        currentMoveIdx: 0, // Index of current move in solution array
-        isPlayerTurn: true, // Flag indicating whose turn it is
-        orientation: "white",
-        lang: "ru", // Current language (default: Russian)
-      };
+      const Puzzles = []; // Array of puzzle state objects
+      let currentLang = "ru"; // Current language (global setting)
 
       // --- 1. GET DATA FROM URL ---
 
       const urlParams = new URLSearchParams(window.location.search);
 
       // Get language from URL parameter (default: 'ru')
-      PuzzleState.lang = urlParams.get("lang") || "ru";
+      currentLang = urlParams.get("lang") || "ru";
       // Validate language, fallback to 'ru' if invalid
-      if (!translations[PuzzleState.lang]) {
-        PuzzleState.lang = "ru";
+      if (!translations[currentLang]) {
+        currentLang = "ru";
       }
 
       // Translation helper function
       function t(key) {
-        return translations[PuzzleState.lang][key] || key;
+        return translations[currentLang][key] || key;
       }
 
-      // Default FEN (from your request)
-      const DEFAULT_FEN =
-        "r3k2r/1b1p1pp1/3qp3/p1bP4/Pp3B2/6P1/1PP1QPB1/R4RK1 b kq - 0 1";
+      // Default puzzles
+      const DEFAULT_PUZZLE_1 = {
+        fen: "r3k2r/1b1p1pp1/3qp3/p1bP4/Pp3B2/6P1/1PP1QPB1/R4RK1 b kq - 0 1",
+        moves: "d6d5,g2d5,b7d5,a1d1,h8h1",
+        message: "Найдите выигрывающую комбинацию",
+      };
 
-      // Default solution: Queen sacrifice (d6 -> d5), Bishop takes (g2 -> d5), Bishop takes (b7 -> d5)
-      // Format: "playerMove,opponentResponse,playerMove..."
-      const DEFAULT_MOVES = "d6d5,g2d5,b7d5,a1d1,h8h1";
+      const DEFAULT_PUZZLE_2 = {
+        fen: "3n3r/2p3k1/1pbbpRpp/6r1/3P4/2PBQ2P/q5P1/5RK1 w - - 0 1",
+        moves:
+          "e3g5,h6g5,f6g6,g7h7,g6e6,h7g7,e6g6,g7h7,g6d6,h7g7,d6g6,g7h7,g6c6,h7g7,c6g6,g7h7,g6b6,h7g7,b6g6,g7h7,g6a6,h7g7,a6a2",
+        message: "Найдите выигрывающую комбинацию",
+      };
 
-      const fenParam = urlParams.get("fen") || DEFAULT_FEN;
-      const movesParam = urlParams.get("moves") || DEFAULT_MOVES;
+      const DEFAULT_PUZZLE_3 = {
+        fen: "r2q2rk/ppp4p/3p4/2b2Q2/3pPPR1/2P2n2/PP3P1P/RNB4K b - - 0 1",
+        moves: "d8h4,g4h4,g8g1",
+        message: "Найдите выигрывающий ход",
+      };
 
-      // Parse moves string into array
-      PuzzleState.solution = movesParam.split(",").map((m) => m.trim());
+      // Parse puzzles from URL
+      // Format: ?puzzles=fen1|moves1|message1;fen2|moves2|message2
+      // Or use legacy format: ?fen=...&moves=...&message=...
+      let puzzlesData = [];
 
-      // Determine player color from FEN
-      // If FEN has 'b', then player plays black
-      const tempGame = new Chess(fenParam);
-      PuzzleState.orientation = tempGame.turn() === "w" ? "white" : "black";
+      const puzzlesParam = urlParams.get("puzzles");
+      const fenParam = urlParams.get("fen");
+      const movesParam = urlParams.get("moves");
+
+      // Check if any puzzle parameters are provided
+      const hasPuzzleParams = puzzlesParam || fenParam || movesParam;
+
+      if (puzzlesParam) {
+        // New format: multiple puzzles separated by ;
+        const puzzleStrings = puzzlesParam.split(";");
+        puzzlesData = puzzleStrings.map((puzzleStr) => {
+          const parts = puzzleStr.split("|");
+          return {
+            fen: decodeURIComponent(parts[0] || DEFAULT_PUZZLE_1.fen),
+            moves: decodeURIComponent(parts[1] || DEFAULT_PUZZLE_1.moves),
+            message: decodeURIComponent(parts[2] || ""),
+          };
+        });
+      } else if (fenParam || movesParam) {
+        // Legacy format: single puzzle
+        const messageParam =
+          urlParams.get("message") || DEFAULT_PUZZLE_1.message;
+        puzzlesData = [
+          {
+            fen: fenParam || DEFAULT_PUZZLE_1.fen,
+            moves: movesParam || DEFAULT_PUZZLE_1.moves,
+            message: messageParam,
+          },
+        ];
+      } else {
+        // No parameters: use 3 default puzzles
+        puzzlesData = [DEFAULT_PUZZLE_1, DEFAULT_PUZZLE_2, DEFAULT_PUZZLE_3];
+      }
 
       // --- 2. INITIALIZATION ---
 
       $(document).ready(function () {
-        initGame();
+        initPuzzles();
       });
 
-      function initGame() {
-        PuzzleState.game = new Chess(fenParam);
+      // Function to notify parent window of content height (for iframe auto-resize)
+      function notifyHeight() {
+        const height = document.body.scrollHeight;
+        window.parent.postMessage(
+          {
+            type: "CHESS_PUZZLE_HEIGHT",
+            height: height,
+          },
+          "*"
+        );
+      }
 
-        const config = {
-          draggable: true,
-          position: fenParam,
-          orientation: PuzzleState.orientation,
-          onDragStart: onDragStart,
-          onDrop: onDrop,
-          onSnapEnd: onSnapEnd,
-          pieceTheme:
-            "https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png",
-        };
+      function initPuzzles() {
+        const container = $("#puzzles-container");
+        container.empty();
 
-        PuzzleState.board = Chessboard("board", config);
-        updateStatus(t("loading"));
-        // Small delay to show loading, then show "Your turn"
-        setTimeout(() => {
-          updateStatus(t("yourTurn"));
-        }, 300);
+        puzzlesData.forEach((puzzleData, index) => {
+          // Create puzzle container
+          const puzzleId = `puzzle-${index}`;
+          const puzzleHtml = `
+            <div class="widget-container" id="${puzzleId}-container">
+              <div class="puzzle-instruction" id="${puzzleId}-instruction">${
+            puzzleData.message || ""
+          }</div>
+              <div id="${puzzleId}-status" class="status-message status-neutral">${t(
+            "loading"
+          )}</div>
+              <div id="${puzzleId}-board"></div>
+            </div>
+          `;
+          container.append(puzzleHtml);
+
+          // Parse moves string into array
+          const solution = puzzleData.moves.split(",").map((m) => m.trim());
+
+          // Determine player color from FEN
+          const tempGame = new Chess(puzzleData.fen);
+          const orientation = tempGame.turn() === "w" ? "white" : "black";
+
+          // Create puzzle state
+          const puzzleState = {
+            id: puzzleId,
+            game: new Chess(puzzleData.fen),
+            board: null,
+            solution: solution,
+            currentMoveIdx: 0,
+            isPlayerTurn: true,
+            orientation: orientation,
+            fen: puzzleData.fen,
+            message: puzzleData.message || "",
+          };
+
+          Puzzles.push(puzzleState);
+
+          // Initialize board
+          const config = {
+            draggable: true,
+            position: puzzleData.fen,
+            orientation: orientation,
+            onDragStart: function (source, piece) {
+              return onDragStart(index, source, piece);
+            },
+            onDrop: function (source, target) {
+              return onDrop(index, source, target);
+            },
+            onSnapEnd: function () {
+              onSnapEnd(index);
+            },
+            pieceTheme:
+              "https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png",
+          };
+
+          puzzleState.board = Chessboard(`${puzzleId}-board`, config);
+
+          // Small delay to show loading, then show "Your turn"
+          setTimeout(() => {
+            updateStatus(index, t("yourTurn"));
+            // Notify parent of height after all puzzles are initialized
+            if (index === puzzlesData.length - 1) {
+              setTimeout(notifyHeight, 500);
+            }
+          }, 300 + index * 100); // Stagger initialization slightly
+        });
+
+        // Also notify height after a short delay to ensure boards are rendered
+        setTimeout(notifyHeight, 1000);
       }
 
       // --- 3. INTERACTION LOGIC ---
 
-      function onDragStart(source, piece) {
+      function onDragStart(puzzleIndex, source, piece) {
+        const state = Puzzles[puzzleIndex];
         // Prevent dragging pieces if game is over or not player's turn
-        if (PuzzleState.game.game_over() || !PuzzleState.isPlayerTurn)
-          return false;
+        if (state.game.game_over() || !state.isPlayerTurn) return false;
 
         // Only allow dragging own pieces
         if (
-          (PuzzleState.game.turn() === "w" && piece.search(/^b/) !== -1) ||
-          (PuzzleState.game.turn() === "b" && piece.search(/^w/) !== -1)
+          (state.game.turn() === "w" && piece.search(/^b/) !== -1) ||
+          (state.game.turn() === "b" && piece.search(/^w/) !== -1)
         ) {
           return false;
         }
       }
 
-      function onDrop(source, target) {
+      function onDrop(puzzleIndex, source, target) {
+        const state = Puzzles[puzzleIndex];
         // Clear any existing highlights when starting a new move
-        clearHighlights();
+        clearHighlights(puzzleIndex);
 
         // 1. Check move legality according to chess rules
         const moveObj = {
@@ -240,157 +359,180 @@
           promotion: "q", // Always promote to queen for simplicity
         };
 
-        const move = PuzzleState.game.move(moveObj);
+        const move = state.game.move(moveObj);
 
         // If move is illegal -> return piece back
         if (move === null) return "snapback";
 
         // 2. Check if move matches puzzle solution
         const userMoveString = source + target;
-        const correctMoveString =
-          PuzzleState.solution[PuzzleState.currentMoveIdx];
+        const correctMoveString = state.solution[state.currentMoveIdx];
 
         if (userMoveString === correctMoveString) {
           // -- CORRECT MOVE --
-          PuzzleState.currentMoveIdx++;
+          state.currentMoveIdx++;
 
           // Check for checkmate first (checkmate is a subset of check)
-          if (PuzzleState.game.in_checkmate()) {
+          if (state.game.in_checkmate()) {
             // Highlight the king's square (opponent is in checkmate, so use current turn color)
-            const kingSquare = getKingSquare(PuzzleState.game.turn());
+            const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
             if (kingSquare) {
-              highlightSquare(kingSquare);
+              highlightSquare(puzzleIndex, kingSquare);
             }
 
             // Check if puzzle is complete
-            if (PuzzleState.currentMoveIdx >= PuzzleState.solution.length) {
-              updateStatus(t("checkmate") + " " + t("victory"), "checkmate");
-              PuzzleState.board.position(PuzzleState.game.fen());
-              notifyParentSuccess(); // Notify parent page
+            if (state.currentMoveIdx >= state.solution.length) {
+              updateStatus(
+                puzzleIndex,
+                t("checkmate") + " " + t("victory"),
+                "checkmate"
+              );
+              state.board.position(state.game.fen());
+              notifyParentSuccess(puzzleIndex); // Notify parent page
               return;
             } else {
               // Checkmate but puzzle continues (shouldn't happen, but handle it)
-              updateStatus(t("checkmate") + "! " + t("correct"), "checkmate");
-              PuzzleState.isPlayerTurn = false;
-              window.setTimeout(makeOpponentMove, 500);
+              updateStatus(
+                puzzleIndex,
+                t("checkmate") + "! " + t("correct"),
+                "checkmate"
+              );
+              state.isPlayerTurn = false;
+              window.setTimeout(() => makeOpponentMove(puzzleIndex), 500);
               return;
             }
           }
 
           // Check for check (but not checkmate)
-          if (PuzzleState.game.in_check()) {
+          if (state.game.in_check()) {
             // Highlight the king's square (opponent is in check, so use current turn color)
-            const kingSquare = getKingSquare(PuzzleState.game.turn());
+            const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
             if (kingSquare) {
-              highlightCheck(kingSquare);
+              highlightCheck(puzzleIndex, kingSquare);
             }
           }
 
           // Check if puzzle is complete
-          if (PuzzleState.currentMoveIdx >= PuzzleState.solution.length) {
-            updateStatus(t("victory"), "correct");
-            PuzzleState.board.position(PuzzleState.game.fen());
-            notifyParentSuccess(); // Notify parent page
+          if (state.currentMoveIdx >= state.solution.length) {
+            updateStatus(puzzleIndex, t("victory"), "correct");
+            state.board.position(state.game.fen());
+            notifyParentSuccess(puzzleIndex); // Notify parent page
             return;
           }
 
           // If puzzle not complete, pass turn to computer
           // Show check message if in check
-          const statusMessage = PuzzleState.game.in_check()
+          const statusMessage = state.game.in_check()
             ? t("check") + "! " + t("correct")
             : t("correct");
-          updateStatus(statusMessage, "correct");
-          PuzzleState.isPlayerTurn = false;
+          updateStatus(puzzleIndex, statusMessage, "correct");
+          state.isPlayerTurn = false;
 
           // Make opponent move with small delay for realism
-          window.setTimeout(makeOpponentMove, 500);
+          window.setTimeout(() => makeOpponentMove(puzzleIndex), 500);
         } else {
           // -- WRONG MOVE --
-          updateStatus(t("wrongMove"), "error");
-          PuzzleState.game.undo(); // Undo move in logic
+          updateStatus(puzzleIndex, t("wrongMove"), "error");
+          state.game.undo(); // Undo move in logic
           return "snapback"; // Return piece visually
         }
       }
 
       // Function for automatic opponent move
-      function makeOpponentMove() {
-        const opponentMoveString =
-          PuzzleState.solution[PuzzleState.currentMoveIdx];
+      function makeOpponentMove(puzzleIndex) {
+        const state = Puzzles[puzzleIndex];
+        const opponentMoveString = state.solution[state.currentMoveIdx];
 
         // Convert string "e2e4" to object {from: 'e2', to: 'e4'}
         const fromSq = opponentMoveString.substring(0, 2);
         const toSq = opponentMoveString.substring(2, 4);
 
-        PuzzleState.game.move({ from: fromSq, to: toSq, promotion: "q" });
-        PuzzleState.board.position(PuzzleState.game.fen());
+        state.game.move({ from: fromSq, to: toSq, promotion: "q" });
+        state.board.position(state.game.fen());
 
         // Check for checkmate after opponent's move
-        if (PuzzleState.game.in_checkmate()) {
+        if (state.game.in_checkmate()) {
           // Highlight the king's square (player is in checkmate, so use current turn color)
-          const kingSquare = getKingSquare(PuzzleState.game.turn());
+          const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
           if (kingSquare) {
-            highlightSquare(kingSquare);
+            highlightSquare(puzzleIndex, kingSquare);
           }
 
-          PuzzleState.currentMoveIdx++;
+          state.currentMoveIdx++;
 
           // Check if puzzle is complete
-          if (PuzzleState.currentMoveIdx >= PuzzleState.solution.length) {
-            updateStatus(t("checkmate") + "! " + t("victory"), "checkmate");
-            notifyParentSuccess(); // Notify parent page
+          if (state.currentMoveIdx >= state.solution.length) {
+            updateStatus(
+              puzzleIndex,
+              t("checkmate") + "! " + t("victory"),
+              "checkmate"
+            );
+            notifyParentSuccess(puzzleIndex); // Notify parent page
             return;
           } else {
             // Checkmate but puzzle continues (shouldn't happen, but handle it)
-            updateStatus(t("checkmate") + "! " + t("yourTurn"), "checkmate");
-            PuzzleState.isPlayerTurn = true;
+            updateStatus(
+              puzzleIndex,
+              t("checkmate") + "! " + t("yourTurn"),
+              "checkmate"
+            );
+            state.isPlayerTurn = true;
             return;
           }
         }
 
         // Check for check after opponent's move (but not checkmate)
-        if (PuzzleState.game.in_check()) {
+        if (state.game.in_check()) {
           // Highlight the king's square (player is in check, so use current turn color)
-          const kingSquare = getKingSquare(PuzzleState.game.turn());
+          const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
           if (kingSquare) {
-            highlightCheck(kingSquare);
+            highlightCheck(puzzleIndex, kingSquare);
           }
         }
 
-        PuzzleState.currentMoveIdx++;
-        PuzzleState.isPlayerTurn = true;
+        state.currentMoveIdx++;
+        state.isPlayerTurn = true;
         // Show check message if in check
-        const statusMessage = PuzzleState.game.in_check()
+        const statusMessage = state.game.in_check()
           ? t("check") + "! " + t("yourTurn")
           : t("yourTurn");
-        updateStatus(statusMessage);
+        updateStatus(puzzleIndex, statusMessage);
       }
 
       // Helper function to highlight a square on the board (for checkmate)
-      function highlightSquare(square) {
+      function highlightSquare(puzzleIndex, square) {
+        const state = Puzzles[puzzleIndex];
         // Remove existing highlights
-        clearHighlights();
+        clearHighlights(puzzleIndex);
         // Add checkmate highlight to the target square
-        $("#board .square-" + square).addClass("square-highlight-checkmate");
+        $(`#${state.id}-board .square-${square}`).addClass(
+          "square-highlight-checkmate"
+        );
       }
 
       // Helper function to highlight a square for check
-      function highlightCheck(square) {
+      function highlightCheck(puzzleIndex, square) {
+        const state = Puzzles[puzzleIndex];
         // Remove existing highlights
-        clearHighlights();
+        clearHighlights(puzzleIndex);
         // Add check highlight to the target square
-        $("#board .square-" + square).addClass("square-highlight-check");
+        $(`#${state.id}-board .square-${square}`).addClass(
+          "square-highlight-check"
+        );
       }
 
       // Helper function to remove all highlights
-      function clearHighlights() {
-        $("#board .square-55d63").removeClass(
+      function clearHighlights(puzzleIndex) {
+        const state = Puzzles[puzzleIndex];
+        $(`#${state.id}-board .square-55d63`).removeClass(
           "square-highlight-checkmate square-highlight-check"
         );
       }
 
       // Helper function to find the king's square for a given color
-      function getKingSquare(color) {
-        const board = PuzzleState.game.board();
+      function getKingSquare(puzzleIndex, color) {
+        const state = Puzzles[puzzleIndex];
+        const board = state.game.board();
         const kingPiece = color === "w" ? "K" : "k";
 
         for (let i = 0; i < 8; i++) {
@@ -411,13 +553,15 @@
       }
 
       // Update board position after animation (castling, etc.)
-      function onSnapEnd() {
-        PuzzleState.board.position(PuzzleState.game.fen());
+      function onSnapEnd(puzzleIndex) {
+        const state = Puzzles[puzzleIndex];
+        state.board.position(state.game.fen());
       }
 
       // Helper function to update status text
-      function updateStatus(text, type = "neutral") {
-        const $status = $("#status");
+      function updateStatus(puzzleIndex, text, type = "neutral") {
+        const state = Puzzles[puzzleIndex];
+        const $status = $(`#${state.id}-status`);
         $status
           .text(text)
           .removeClass(
@@ -432,12 +576,14 @@
 
       // --- 4. PARENT WINDOW COMMUNICATION ---
 
-      function notifyParentSuccess() {
+      function notifyParentSuccess(puzzleIndex) {
+        const state = Puzzles[puzzleIndex];
         // Send message to parent window (site where widget is embedded)
         window.parent.postMessage(
           {
             type: "CHESS_PUZZLE_SOLVED",
-            fen: PuzzleState.game.fen(),
+            puzzleIndex: puzzleIndex,
+            fen: state.game.fen(),
             solved: true,
           },
           "*"
