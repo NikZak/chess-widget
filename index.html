@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chess Puzzle Widget</title>
+
+    <!-- jQuery (required for Chessboard.js) -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- Chessboard.js styles -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"
+    />
+
+    <!-- Chess logic (Chess.js) and UI (Chessboard.js) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        background-color: #f4f4f4;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      .widget-container {
+        background: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        max-width: 450px;
+        text-align: center;
+        box-sizing: border-box;
+      }
+
+      #board {
+        width: 100%;
+        margin: 0 auto 15px auto;
+      }
+
+      .status-message {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 10px;
+        min-height: 1.5em;
+      }
+
+      .status-correct {
+        color: #27ae60;
+      }
+      .status-error {
+        color: #c0392b;
+      }
+      .status-neutral {
+        color: #2c3e50;
+      }
+
+      /* Responsive design for mobile devices */
+      @media (max-width: 480px) {
+        .widget-container {
+          padding: 10px;
+          box-shadow: none;
+          background: transparent;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="widget-container">
+      <div id="status" class="status-message status-neutral">
+        <!-- Status will be set by JavaScript -->
+      </div>
+      <div id="board"></div>
+    </div>
+
+    <script>
+      /**
+       * TRANSLATIONS
+       * Embedded JSON with English and Russian translations
+       */
+      const translations = {
+        en: {
+          loading: "Loading puzzle...",
+          yourTurn: "Your turn!",
+          correct: "Excellent! Wait for response...",
+          victory: "Victory! Puzzle solved.",
+          wrongMove: "Wrong move. Try again.",
+        },
+        ru: {
+          loading: "Загрузка задачи...",
+          yourTurn: "Ваш ход!",
+          correct: "Отлично! Ждите ответ...",
+          victory: "Победа! Задача решена.",
+          wrongMove: "Неверный ход. Попробуйте еще раз.",
+        },
+      };
+
+      /**
+       * CONFIGURATION AND STATE
+       * Main object for storing widget state
+       */
+      const PuzzleState = {
+        game: null, // Chess.js logic object
+        board: null, // Chessboard.js UI object
+        solution: [], // Array of correct moves (strings like 'e2e4')
+        currentMoveIdx: 0, // Index of current move in solution array
+        isPlayerTurn: true, // Flag indicating whose turn it is
+        orientation: "white",
+        lang: "ru", // Current language (default: Russian)
+      };
+
+      // --- 1. GET DATA FROM URL ---
+
+      const urlParams = new URLSearchParams(window.location.search);
+
+      // Get language from URL parameter (default: 'ru')
+      PuzzleState.lang = urlParams.get("lang") || "ru";
+      // Validate language, fallback to 'ru' if invalid
+      if (!translations[PuzzleState.lang]) {
+        PuzzleState.lang = "ru";
+      }
+
+      // Translation helper function
+      function t(key) {
+        return translations[PuzzleState.lang][key] || key;
+      }
+
+      // Default FEN (from your request)
+      const DEFAULT_FEN =
+        "r3k2r/1b1p1pp1/3qp3/p1bP4/Pp3B2/6P1/1PP1QPB1/R4RK1 b kq - 0 1";
+
+      // Default solution: Queen sacrifice (d6 -> d5), Bishop takes (g2 -> d5), Bishop takes (b7 -> d5)
+      // Format: "playerMove,opponentResponse,playerMove..."
+      const DEFAULT_MOVES = "d6d5,g2d5,b7d5";
+
+      const fenParam = urlParams.get("fen") || DEFAULT_FEN;
+      const movesParam = urlParams.get("moves") || DEFAULT_MOVES;
+
+      // Parse moves string into array
+      PuzzleState.solution = movesParam.split(",").map((m) => m.trim());
+
+      // Determine player color from FEN
+      // If FEN has 'b', then player plays black
+      const tempGame = new Chess(fenParam);
+      PuzzleState.orientation = tempGame.turn() === "w" ? "white" : "black";
+
+      // --- 2. INITIALIZATION ---
+
+      $(document).ready(function () {
+        initGame();
+      });
+
+      function initGame() {
+        PuzzleState.game = new Chess(fenParam);
+
+        const config = {
+          draggable: true,
+          position: fenParam,
+          orientation: PuzzleState.orientation,
+          onDragStart: onDragStart,
+          onDrop: onDrop,
+          onSnapEnd: onSnapEnd,
+          pieceTheme:
+            "https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png",
+        };
+
+        PuzzleState.board = Chessboard("board", config);
+        updateStatus(t("loading"));
+        // Small delay to show loading, then show "Your turn"
+        setTimeout(() => {
+          updateStatus(t("yourTurn"));
+        }, 300);
+      }
+
+      // --- 3. INTERACTION LOGIC ---
+
+      function onDragStart(source, piece) {
+        // Prevent dragging pieces if game is over or not player's turn
+        if (PuzzleState.game.game_over() || !PuzzleState.isPlayerTurn)
+          return false;
+
+        // Only allow dragging own pieces
+        if (
+          (PuzzleState.game.turn() === "w" && piece.search(/^b/) !== -1) ||
+          (PuzzleState.game.turn() === "b" && piece.search(/^w/) !== -1)
+        ) {
+          return false;
+        }
+      }
+
+      function onDrop(source, target) {
+        // 1. Check move legality according to chess rules
+        const moveObj = {
+          from: source,
+          to: target,
+          promotion: "q", // Always promote to queen for simplicity
+        };
+
+        const move = PuzzleState.game.move(moveObj);
+
+        // If move is illegal -> return piece back
+        if (move === null) return "snapback";
+
+        // 2. Check if move matches puzzle solution
+        const userMoveString = source + target;
+        const correctMoveString =
+          PuzzleState.solution[PuzzleState.currentMoveIdx];
+
+        if (userMoveString === correctMoveString) {
+          // -- CORRECT MOVE --
+          PuzzleState.currentMoveIdx++;
+
+          // Check if puzzle is complete
+          if (PuzzleState.currentMoveIdx >= PuzzleState.solution.length) {
+            updateStatus(t("victory"), "correct");
+            PuzzleState.board.position(PuzzleState.game.fen());
+            notifyParentSuccess(); // Notify parent page
+            return;
+          }
+
+          // If puzzle not complete, pass turn to computer
+          updateStatus(t("correct"), "correct");
+          PuzzleState.isPlayerTurn = false;
+
+          // Make opponent move with small delay for realism
+          window.setTimeout(makeOpponentMove, 500);
+        } else {
+          // -- WRONG MOVE --
+          updateStatus(t("wrongMove"), "error");
+          PuzzleState.game.undo(); // Undo move in logic
+          return "snapback"; // Return piece visually
+        }
+      }
+
+      // Function for automatic opponent move
+      function makeOpponentMove() {
+        const opponentMoveString =
+          PuzzleState.solution[PuzzleState.currentMoveIdx];
+
+        // Convert string "e2e4" to object {from: 'e2', to: 'e4'}
+        const fromSq = opponentMoveString.substring(0, 2);
+        const toSq = opponentMoveString.substring(2, 4);
+
+        PuzzleState.game.move({ from: fromSq, to: toSq, promotion: "q" });
+        PuzzleState.board.position(PuzzleState.game.fen());
+
+        PuzzleState.currentMoveIdx++;
+        PuzzleState.isPlayerTurn = true;
+        updateStatus(t("yourTurn"));
+      }
+
+      // Update board position after animation (castling, etc.)
+      function onSnapEnd() {
+        PuzzleState.board.position(PuzzleState.game.fen());
+      }
+
+      // Helper function to update status text
+      function updateStatus(text, type = "neutral") {
+        const $status = $("#status");
+        $status
+          .text(text)
+          .removeClass("status-correct status-error status-neutral");
+
+        if (type === "correct") $status.addClass("status-correct");
+        else if (type === "error") $status.addClass("status-error");
+        else $status.addClass("status-neutral");
+      }
+
+      // --- 4. PARENT WINDOW COMMUNICATION ---
+
+      function notifyParentSuccess() {
+        // Send message to parent window (site where widget is embedded)
+        window.parent.postMessage(
+          {
+            type: "CHESS_PUZZLE_SOLVED",
+            fen: PuzzleState.game.fen(),
+            solved: true,
+          },
+          "*"
+        );
+      }
+    </script>
+  </body>
+</html>
