@@ -1,43 +1,62 @@
 /**
  * Main chess widget logic
- * FIXED: Removed strict Event Type check that was blocking clicks.
+ * FIXED:
+ * 1. Replaced library 'addMarker' with custom DOM-based highlighting.
+ * 2. This fixes the "state.board.addMarker is not a function" error.
+ * 3. Works by calculating percentage positions (12.5% per square).
  */
 
 (function () {
   "use strict";
 
-  // --- 1. Prevent Double Execution ---
   if (window.ChessWidgetIsRunning) {
     return;
   }
   window.ChessWidgetIsRunning = true;
 
-  // Initialize widget namespace
   window.ChessWidget = {
     Puzzles: [],
     currentLang: "ru",
     t: null,
   };
 
-  // Initialize configuration
+  // --- CSS INJECTION FOR HIGHLIGHTS ---
+  // We inject styles for our custom highlights so we don't depend on external CSS
+  const style = document.createElement("style");
+  style.innerHTML = `
+    .custom-highlight-layer {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; /* Let clicks pass through to the board */
+      z-index: 1; /* Below pieces (usually z-index 10+), above board bg */
+    }
+    .custom-highlight-square {
+      position: absolute;
+      width: 12.5%; 
+      height: 12.5%;
+      display: block;
+    }
+    .highlight-source { background-color: rgba(255, 255, 0, 0.4); } /* Yellowish */
+    .highlight-move { background-color: rgba(155, 199, 0, 0.41); } /* Greenish */
+    .highlight-check { background-color: rgba(255, 0, 0, 0.5); }   /* Red */
+  `;
+  document.head.appendChild(style);
+
   window.ChessWidget.currentLang = getLanguage();
   window.ChessWidget.t = createTranslator(window.ChessWidget.currentLang);
   const puzzlesData = parsePuzzlesFromURL();
 
-  // Initialize puzzles
   function initPuzzles() {
     console.log("[DEBUG] Starting initPuzzles...");
 
     const container = $("#puzzles-container");
     container.empty();
 
-    // Clear the State Array to prevent "ghost" puzzles
     window.ChessWidget.Puzzles = [];
 
     puzzlesData.forEach((puzzleData, index) => {
       const puzzleId = `puzzle-${index}`;
 
-      // Create HTML
       const puzzleHtml = `
         <div class="widget-container" id="${puzzleId}-container">
           <div class="puzzle-instruction" id="${puzzleId}-instruction">${
@@ -46,12 +65,11 @@
           <div id="${puzzleId}-status" class="status-message status-neutral">${window.ChessWidget.t(
         "loading"
       )}</div>
-          <div id="${puzzleId}-board"></div>
+          <div id="${puzzleId}-board" style="position: relative;"></div> <!-- Relative for absolute overlay -->
         </div>
       `;
       container.append(puzzleHtml);
 
-      // Prepare Logic
       const solution = puzzleData.moves.split(",").map((m) => m.trim());
       const tempGame = new Chess(puzzleData.fen);
       const orientation = tempGame.turn() === "w" ? "white" : "black";
@@ -69,12 +87,13 @@
         waitingForOpponent: false,
       };
 
-      // Push to State Array
       window.ChessWidget.Puzzles.push(puzzleState);
 
       const boardElement = document.getElementById(`${puzzleId}-board`);
 
-      // Configuration for cm-chessboard
+      // Initialize the custom highlight layer
+      createHighlightLayer(boardElement, index);
+
       const config = {
         position: puzzleData.fen,
         orientation: orientation,
@@ -82,10 +101,6 @@
         style: {
           cssClass: "default",
           showCoordinates: false,
-          pieces: {
-            type: "svgSprite",
-            file: "pieces/standard.svg",
-          },
         },
         sprite: {
           url: "https://cdn.jsdelivr.net/npm/cm-chessboard/assets/images/chessboard-sprite-staunty.svg",
@@ -94,19 +109,16 @@
         animationDuration: 300,
       };
 
-      // Initialize Board
       puzzleState.board = new Chessboard(boardElement, config);
 
       puzzleState.board.initialized
         .then(() => {
-          console.log(`[DEBUG] Board initialized for ${puzzleId}`);
           enablePlayerInput(index);
         })
         .catch((err) => {
           console.error(`Board initialization failed for ${puzzleId}:`, err);
         });
 
-      // UI Updates
       setTimeout(() => {
         updateStatus(index, window.ChessWidget.t("yourTurn"));
         if (index === puzzlesData.length - 1) {
@@ -120,11 +132,9 @@
 
   function enablePlayerInput(index) {
     if (!window.ChessWidget.Puzzles[index]) return;
-
     const state = window.ChessWidget.Puzzles[index];
     if (!state.board) return;
 
-    // Reset input first to be safe
     try {
       state.board.disableMoveInput();
     } catch (e) {}
@@ -134,7 +144,6 @@
         state.board.enableMoveInput((event) => {
           return onMoveInput(index, event);
         });
-        console.log(`[DEBUG] Input enabled for puzzle ${index}`);
       } catch (e) {
         console.error(`[DEBUG] Failed to enable input for puzzle ${index}:`, e);
       }
@@ -144,27 +153,27 @@
   function onMoveInput(puzzleIndex, event) {
     const state = window.ChessWidget.Puzzles[puzzleIndex];
 
-    // --- FIX: Use string literals instead of checking window.Chessboard.INPUT_EVENT_TYPE ---
-    // This ensures it works even if the Enum isn't exposed globally.
-
     switch (event.type) {
       case "moveInputStarted":
         if (state.game.game_over() || !state.isPlayerTurn) {
           return false;
         }
-        // Validate piece color
         const piece = state.game.get(event.squareFrom);
         if (!piece || piece.color !== state.game.turn()) {
           return false;
         }
+        // Highlight the source square
+        highlightSquare(puzzleIndex, event.squareFrom, "highlight-source");
         return true;
 
       case "validateMoveInput":
-        if (!event.squareTo) return false;
+        if (!event.squareTo) {
+          clearHighlights(puzzleIndex);
+          return false;
+        }
         return processMove(puzzleIndex, event.squareFrom, event.squareTo);
 
       case "moveInputFinished":
-        // If it was a valid move (handled in validateMoveInput), we might need to trigger opponent
         if (state.waitingForOpponent) {
           state.waitingForOpponent = false;
           try {
@@ -177,6 +186,7 @@
         return true;
 
       case "moveInputCanceled":
+        clearHighlights(puzzleIndex);
         state.waitingForOpponent = false;
         return true;
 
@@ -187,26 +197,27 @@
 
   function processMove(puzzleIndex, source, target) {
     const state = window.ChessWidget.Puzzles[puzzleIndex];
+
     clearHighlights(puzzleIndex);
 
-    // Attempt move in chess.js logic
     const moveObj = { from: source, to: target, promotion: "q" };
     const move = state.game.move(moveObj);
 
-    // If illegal move in chess rules, return false (snap back)
     if (move === null) return false;
 
     const userMoveString = source + target;
     const correctMoveString = state.solution[state.currentMoveIdx];
 
-    // Check against puzzle solution
     if (userMoveString === correctMoveString) {
       state.currentMoveIdx++;
 
-      // Check for immediate checkmate by player
+      // Highlight the valid move (From and To)
+      highlightMove(puzzleIndex, source, target);
+
       if (state.game.in_checkmate()) {
         const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-        if (kingSquare) highlightSquare(puzzleIndex, kingSquare);
+        if (kingSquare)
+          highlightSquare(puzzleIndex, kingSquare, "highlight-check");
 
         if (state.currentMoveIdx >= state.solution.length) {
           updateStatus(
@@ -224,13 +235,12 @@
         return true;
       }
 
-      // Check for Check
       if (state.game.in_check()) {
         const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-        if (kingSquare) highlightCheck(puzzleIndex, kingSquare);
+        if (kingSquare)
+          highlightSquare(puzzleIndex, kingSquare, "highlight-check");
       }
 
-      // Check if puzzle is finished
       if (state.currentMoveIdx >= state.solution.length) {
         updateStatus(puzzleIndex, window.ChessWidget.t("victory"), "correct");
         notifyParentSuccess(puzzleIndex);
@@ -238,7 +248,6 @@
         return true;
       }
 
-      // Puzzle continues
       const statusMessage = state.game.in_check()
         ? window.ChessWidget.t("check") + "! " + window.ChessWidget.t("correct")
         : window.ChessWidget.t("correct");
@@ -248,10 +257,9 @@
       state.waitingForOpponent = true;
       return true;
     } else {
-      // WRONG MOVE: Undo logic
       updateStatus(puzzleIndex, window.ChessWidget.t("wrongMove"), "error");
       state.game.undo();
-      // Force board reset to remove the dragged piece visual if needed
+      clearHighlights(puzzleIndex);
       setTimeout(() => {
         try {
           state.board.setPosition(state.game.fen(), false);
@@ -274,9 +282,13 @@
     state.board
       .setPosition(state.game.fen(), true)
       .then(() => {
+        clearHighlights(puzzleIndex);
+        highlightMove(puzzleIndex, fromSq, toSq);
+
         if (state.game.in_checkmate()) {
           const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-          if (kingSquare) highlightSquare(puzzleIndex, kingSquare);
+          if (kingSquare)
+            highlightSquare(puzzleIndex, kingSquare, "highlight-check");
           state.currentMoveIdx++;
           updateStatus(
             puzzleIndex,
@@ -291,7 +303,8 @@
 
         if (state.game.in_check()) {
           const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-          if (kingSquare) highlightCheck(puzzleIndex, kingSquare);
+          if (kingSquare)
+            highlightSquare(puzzleIndex, kingSquare, "highlight-check");
         }
 
         state.currentMoveIdx++;
@@ -308,11 +321,79 @@
       })
       .catch((err) => {
         console.error("Error animating opponent move:", err);
-        // Fallback if animation fails
         state.board.setPosition(state.game.fen(), false);
         state.isPlayerTurn = true;
         enablePlayerInput(puzzleIndex);
       });
+  }
+
+  // --- CUSTOM HIGHLIGHTING SYSTEM ---
+
+  function createHighlightLayer(boardElement, index) {
+    // Create a dedicated div for highlights that sits on top of the board
+    const layerId = `highlight-layer-${index}`;
+    if (document.getElementById(layerId)) return;
+
+    const layer = document.createElement("div");
+    layer.id = layerId;
+    layer.className = "custom-highlight-layer";
+    boardElement.appendChild(layer);
+  }
+
+  function highlightSquare(puzzleIndex, square, cssClass) {
+    const state = window.ChessWidget.Puzzles[puzzleIndex];
+    const layer = document.getElementById(`highlight-layer-${puzzleIndex}`);
+    if (!layer || !square) return;
+
+    // Calculate position
+    const fileMap = { a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7 };
+    const file = fileMap[square.charAt(0)];
+    const rank = parseInt(square.charAt(1)) - 1; // 0-7
+
+    let top, left;
+
+    if (state.orientation === "white") {
+      left = file * 12.5;
+      top = (7 - rank) * 12.5;
+    } else {
+      left = (7 - file) * 12.5;
+      top = rank * 12.5;
+    }
+
+    const div = document.createElement("div");
+    div.className = `custom-highlight-square ${cssClass}`;
+    div.style.left = `${left}%`;
+    div.style.top = `${top}%`;
+
+    layer.appendChild(div);
+  }
+
+  function highlightMove(puzzleIndex, from, to) {
+    highlightSquare(puzzleIndex, from, "highlight-move");
+    highlightSquare(puzzleIndex, to, "highlight-move");
+  }
+
+  function clearHighlights(puzzleIndex) {
+    const layer = document.getElementById(`highlight-layer-${puzzleIndex}`);
+    if (layer) {
+      layer.innerHTML = "";
+    }
+  }
+
+  function getKingSquare(puzzleIndex, color) {
+    const state = window.ChessWidget.Puzzles[puzzleIndex];
+    const board = state.game.board();
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = board[r][c];
+        if (piece && piece.type === "k" && piece.color === color) {
+          const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+          const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
+          return files[c] + ranks[r];
+        }
+      }
+    }
+    return null;
   }
 
   // --- Loader Logic ---
