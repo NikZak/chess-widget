@@ -76,6 +76,7 @@ Qh4,[Rxh4,Rg1#|h3,Qxh3#]
 ```
 
 This creates 2 variations:
+
 1. Player: Qh4 → Opponent: Rxh4 → Player: Rg1#
 2. Player: Qh4 → Opponent: h3 → Player: Qxh3#
 
@@ -86,6 +87,7 @@ Re8,[Kh7,Qd3,f5,Qxc2|Bf8,Rxf8,[Kg7,Rxf7|Kxf8,Nf5,[Kg8,Qf8,[Kxf8,Rd8#|Kh7,Qg7#]|K
 ```
 
 This creates 5 variations (all leaves of the tree):
+
 1. `Re8, Kh7, Qd3, f5, Qxc2`
 2. `Re8, Bf8, Rxf8, Kg7, Rxf7`
 3. `Re8, Bf8, Rxf8, Kxf8, Nf5, Kg8, Qf8, Kxf8, Rd8#`
@@ -95,6 +97,7 @@ This creates 5 variations (all leaves of the tree):
 **Smart Branch Transitions:**
 
 When switching between variations, the board resets to the **nearest common ancestor** (not the beginning!). For example:
+
 - Variation 3 → 4: Both share `Re8, Bf8, Rxf8, Kxf8, Nf5, Kg8, Qf8`, so it resets there
 - Variation 2 → 3: Both share `Re8, Bf8, Rxf8`, so it resets there
 
