@@ -39,6 +39,21 @@
     .highlight-source { background-color: rgba(255, 255, 0, 0.4); } /* Yellowish */
     .highlight-move { background-color: rgba(155, 199, 0, 0.41); } /* Greenish */
     .highlight-check { background-color: rgba(255, 0, 0, 0.5); }   /* Red */
+    
+    /* Branch info styling */
+    .branch-info {
+      font-size: 0.85rem;
+      color: #7f8c8d;
+      margin-bottom: 5px;
+      padding: 4px 8px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .branch-info.branch-complete {
+      background: #d5f5e3;
+      color: #27ae60;
+    }
   `;
   document.head.appendChild(style);
 
@@ -57,11 +72,16 @@
     puzzlesData.forEach((puzzleData, index) => {
       const puzzleId = `puzzle-${index}`;
 
+      // Parse branches from moves string
+      const branches = parseBranchMoves(puzzleData.moves);
+      const hasBranches = branches.length > 1;
+
       const puzzleHtml = `
         <div class="widget-container" id="${puzzleId}-container">
           <div class="puzzle-instruction" id="${puzzleId}-instruction">${
         puzzleData.message || ""
       }</div>
+          ${hasBranches ? `<div id="${puzzleId}-branch-info" class="branch-info"></div>` : ''}
           <div id="${puzzleId}-status" class="status-message status-neutral">${window.ChessWidget.t(
         "loading"
       )}</div>
@@ -70,7 +90,6 @@
       `;
       container.append(puzzleHtml);
 
-      const solution = puzzleData.moves.split(",").map((m) => m.trim());
       const tempGame = new Chess(puzzleData.fen);
       // Determine orientation directly from FEN string: extract turn indicator (w/b) after board position
       // FEN format: "board position" "turn" "castling" "en passant" "halfmove" "fullmove"
@@ -82,7 +101,10 @@
         id: puzzleId,
         game: new Chess(puzzleData.fen),
         board: null,
-        solution: solution,
+        // Branch support
+        branches: branches,
+        currentBranchIdx: 0,
+        solution: branches[0], // Current branch moves
         currentMoveIdx: 0,
         isPlayerTurn: true,
         orientation: orientation,
@@ -141,6 +163,7 @@
 
       setTimeout(() => {
         updateStatus(index, window.ChessWidget.t("yourTurn"));
+        updateBranchInfo(index);
         if (index === puzzlesData.length - 1) {
           setTimeout(notifyHeight, 500);
         }
@@ -148,6 +171,55 @@
     });
 
     setTimeout(notifyHeight, 1000);
+  }
+
+  // Update branch progress display
+  function updateBranchInfo(puzzleIndex) {
+    const state = window.ChessWidget.Puzzles[puzzleIndex];
+    if (!state || state.branches.length <= 1) return;
+    
+    const branchInfoEl = document.getElementById(`${state.id}-branch-info`);
+    if (!branchInfoEl) return;
+    
+    const msg = window.ChessWidget.t("branchProgress")
+      .replace("{current}", state.currentBranchIdx + 1)
+      .replace("{total}", state.branches.length);
+    branchInfoEl.textContent = msg;
+    branchInfoEl.classList.remove("branch-complete");
+  }
+
+  // Reset puzzle for next branch
+  function startNextBranch(puzzleIndex) {
+    const state = window.ChessWidget.Puzzles[puzzleIndex];
+    if (!state) return;
+    
+    state.currentBranchIdx++;
+    
+    // Check if all branches completed
+    if (state.currentBranchIdx >= state.branches.length) {
+      updateStatus(puzzleIndex, window.ChessWidget.t("victory"), "correct");
+      notifyParentSuccess(puzzleIndex);
+      return;
+    }
+    
+    // Reset game to initial position
+    state.game = new Chess(state.fen);
+    state.solution = state.branches[state.currentBranchIdx];
+    state.currentMoveIdx = 0;
+    state.isPlayerTurn = true;
+    state.waitingForOpponent = false;
+    
+    // Animate board reset
+    state.board.setPosition(state.fen, true).then(() => {
+      clearHighlights(puzzleIndex);
+      updateBranchInfo(puzzleIndex);
+      updateStatus(puzzleIndex, window.ChessWidget.t("nextBranch"));
+      
+      setTimeout(() => {
+        updateStatus(puzzleIndex, window.ChessWidget.t("yourTurn"));
+        enablePlayerInput(puzzleIndex);
+      }, 800);
+    });
   }
 
   function enablePlayerInput(index) {
@@ -240,15 +312,28 @@
           highlightSquare(puzzleIndex, kingSquare, "highlight-check");
 
         if (state.currentMoveIdx >= state.solution.length) {
-          updateStatus(
-            puzzleIndex,
-            window.ChessWidget.t("checkmate") +
-              " " +
-              window.ChessWidget.t("victory"),
-            "checkmate"
-          );
-          notifyParentSuccess(puzzleIndex);
-          state.waitingForOpponent = false;
+          // Branch/puzzle complete with checkmate
+          if (state.branches.length > 1 && state.currentBranchIdx < state.branches.length - 1) {
+            // More branches to solve
+            updateStatus(
+              puzzleIndex,
+              window.ChessWidget.t("checkmate") + "! " + window.ChessWidget.t("branchComplete"),
+              "checkmate"
+            );
+            state.waitingForOpponent = false;
+            setTimeout(() => startNextBranch(puzzleIndex), 1500);
+          } else {
+            // All branches done
+            updateStatus(
+              puzzleIndex,
+              window.ChessWidget.t("checkmate") +
+                " " +
+                window.ChessWidget.t("victory"),
+              "checkmate"
+            );
+            notifyParentSuccess(puzzleIndex);
+            state.waitingForOpponent = false;
+          }
         } else {
           state.waitingForOpponent = true;
         }
@@ -262,9 +347,18 @@
       }
 
       if (state.currentMoveIdx >= state.solution.length) {
-        updateStatus(puzzleIndex, window.ChessWidget.t("victory"), "correct");
-        notifyParentSuccess(puzzleIndex);
-        state.waitingForOpponent = false;
+        // Branch complete (no checkmate)
+        if (state.branches.length > 1 && state.currentBranchIdx < state.branches.length - 1) {
+          // More branches to solve
+          updateStatus(puzzleIndex, window.ChessWidget.t("branchComplete"), "correct");
+          state.waitingForOpponent = false;
+          setTimeout(() => startNextBranch(puzzleIndex), 1500);
+        } else {
+          // All branches done
+          updateStatus(puzzleIndex, window.ChessWidget.t("victory"), "correct");
+          notifyParentSuccess(puzzleIndex);
+          state.waitingForOpponent = false;
+        }
         return true;
       }
 
@@ -310,14 +404,27 @@
           if (kingSquare)
             highlightSquare(puzzleIndex, kingSquare, "highlight-check");
           state.currentMoveIdx++;
-          updateStatus(
-            puzzleIndex,
-            window.ChessWidget.t("checkmate") +
-              "! " +
-              window.ChessWidget.t("victory"),
-            "checkmate"
-          );
-          notifyParentSuccess(puzzleIndex);
+          
+          // Check if more branches to solve
+          if (state.branches.length > 1 && state.currentBranchIdx < state.branches.length - 1) {
+            updateStatus(
+              puzzleIndex,
+              window.ChessWidget.t("checkmate") +
+                "! " +
+                window.ChessWidget.t("branchComplete"),
+              "checkmate"
+            );
+            setTimeout(() => startNextBranch(puzzleIndex), 1500);
+          } else {
+            updateStatus(
+              puzzleIndex,
+              window.ChessWidget.t("checkmate") +
+                "! " +
+                window.ChessWidget.t("victory"),
+              "checkmate"
+            );
+            notifyParentSuccess(puzzleIndex);
+          }
           return;
         }
 

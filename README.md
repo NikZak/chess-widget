@@ -6,6 +6,7 @@ An embeddable chess puzzle widget that allows users to solve chess puzzles inter
 
 - 🎯 Interactive chess puzzles with drag-and-drop or click-to-move
 - 📝 Support for both **SAN** (Short Algebraic Notation: `Nf3`, `Qxd5`) and **LAN** (Long Algebraic Notation: `g1f3`, `d1d5`)
+- 🌿 **Branching puzzles** - opponent can respond differently, player must solve all variations
 - 🌍 Multi-language support (English and Russian)
 - 📱 Responsive design for mobile and desktop
 - 🔗 Easy iframe embedding
@@ -57,6 +58,37 @@ Standard chess notation with piece letters (K, Q, R, B, N) and capture notation 
 
 The widget automatically detects and converts between formats.
 
+### Branching Puzzles
+
+Puzzles can have multiple variations where the opponent responds differently. The player must solve ALL branches to complete the puzzle.
+
+**Syntax:** Use square brackets `[...]` to define branches, with `|` separating alternatives:
+
+```
+playerMove,[opponentResp1,playerReply1|opponentResp2,playerReply2,...]
+```
+
+**Example:**
+
+```
+d8h4,[g4h4,g8g1|h2h3,g8g4,f5g4,h4g4]
+```
+
+This means:
+
+1. Player plays `d8h4` (Qh4)
+2. **Branch 1:** Opponent plays `g4h4` (Rxh4), player responds `g8g1` (Rg1#)
+3. **Branch 2:** Opponent plays `h2h3`, player plays `g8g4` (Rxg4+), opponent `f5g4` (Qxg4), player `h4g4` (Qxg4)
+
+When Branch 1 is complete, the board resets and the player must solve Branch 2. The puzzle shows "Вариант 1 из 2" (Variation 1 of 2) progress indicator.
+
+**Features:**
+
+- Progress indicator shows current branch / total branches
+- Board automatically resets between branches
+- Victory only when ALL branches are solved
+- Works with both SAN and LAN notation
+
 ## Examples
 
 ### Single Puzzle
@@ -70,6 +102,15 @@ The widget automatically detects and converts between formats.
 <!-- Using SAN notation -->
 <iframe
   src="index.html?fen=r2q2rk/ppp4p/3p4/2b2Q2/3pPPR1/2P2n2/PP3P1P/RNB4K%20b%20-%20-%200%201&moves=Qh4,Rxh4,Rg1%23&message=Find%20the%20checkmate&lang=en"
+></iframe>
+```
+
+### Branching Puzzle
+
+```html
+<!-- Puzzle with 2 variations - opponent can respond differently -->
+<iframe
+  src="index.html?fen=r2q2rk/ppp4p/3p4/2b2Q2/3pPPR1/2P2n2/PP3P1P/RNB4K%20b%20-%20-%200%201&moves=d8h4,[g4h4,g8g1|h2h3,g8g4,f5g4,h4g4]&message=Find%20the%20winning%20move%20(2%20variations)&lang=en"
 ></iframe>
 ```
 
@@ -161,12 +202,16 @@ window.addEventListener("message", function (event) {
 ```
 chess_widget/
 ├── index.html           # Main widget HTML
-├── config.js            # Configuration and default puzzles
-├── chess-widget.js      # Main widget logic
-├── chess-ui.js          # UI helper functions
-├── notation-converter.js # SAN ↔ LAN conversion utilities
 ├── example.html         # Embedding example
-└── README.md            # This file
+├── README.md            # This file
+├── js/
+│   ├── config.js            # Configuration and default puzzles
+│   ├── chess-widget.js      # Main widget logic
+│   ├── chess-ui.js          # UI helper functions
+│   └── notation-converter.js # SAN ↔ LAN conversion utilities
+└── docs/
+    ├── Letter.md            # Project documentation
+    └── Letter-email-plain.txt
 ```
 
 ## Dependencies (loaded via CDN)
