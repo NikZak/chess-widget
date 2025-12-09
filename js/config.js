@@ -73,6 +73,12 @@ const DEFAULT_PUZZLES_2 = [
     moves: "Qh4,[Rxh4,Rg1#|h3,Qxh3#]",
     message: "Найдите выигрывающий ход (2 варианта)",
   },
+  {
+    fen: "6k1/5pb1/1p1N3p/p5p1/5q2/Q6P/PPr5/3RR2K w - - 0 1",
+    moves:
+      "Re8, [Kh7, Qd3, f5, Qxc2|Bf8, Rxf8, [Kg7, Rxf7, Qxf7, Nxf7| Kxf8, Nf5, [Kg8, Qf8, [Kxf8, Rd8#|Kh7, Qg7#]|Ke8, Ng7#]]]",
+    message: "Найдите выигрывающую комбинацию",
+  },
 ];
 
 // Parse puzzles from URL
@@ -119,82 +125,95 @@ function parsePuzzlesFromURL() {
 }
 
 /**
- * Parse moves string with branch syntax
- * Syntax: "move1,move2,[branchA_opp,branchA_reply|branchB_opp,branchB_reply],..."
- * Returns array of complete move sequences (branches)
+ * Parse moves string with branch syntax (supports nested branches)
+ * Syntax: "move1,[branchA|branchB,[subBranch1|subBranch2]]"
+ * Returns array of complete move sequences (all leaves of the tree)
  *
- * Example: "d8h4,[g4h4,g8g1|h2h3,g8g4]" returns:
+ * Example: "Re8,[Kh7,Qd3|Bf8,Rxf8,[Kg7,Rxf7|Kxf8,Nf5]]" returns 3 branches:
  * [
- *   ["d8h4", "g4h4", "g8g1"],
- *   ["d8h4", "h2h3", "g8g4"]
+ *   ["Re8", "Kh7", "Qd3"],
+ *   ["Re8", "Bf8", "Rxf8", "Kg7", "Rxf7"],
+ *   ["Re8", "Bf8", "Rxf8", "Kxf8", "Nf5"]
  * ]
  */
 function parseBranchMoves(movesString) {
-  // Check if there are branches
+  // No brackets - single sequence
   if (!movesString.includes("[")) {
-    // No branches - return single sequence
-    return [movesString.split(",").map((m) => m.trim())];
+    return [
+      movesString
+        .split(",")
+        .map((m) => m.trim())
+        .filter((m) => m),
+    ];
   }
 
-  // Find bracket sections and split accordingly
-  const result = [];
-  let prefix = [];
-  let i = 0;
-  const chars = movesString;
+  // Recursively expand all branches
+  return expandBranches(movesString);
+}
 
-  while (i < chars.length) {
-    if (chars[i] === "[") {
-      // Found branch start - extract everything before as prefix moves
-      const beforeBracket = chars.substring(0, i);
-      if (beforeBracket) {
-        prefix = beforeBracket
-          .split(",")
-          .map((m) => m.trim())
-          .filter((m) => m);
-      }
+/**
+ * Recursively expand a moves string with nested brackets into all possible paths
+ */
+function expandBranches(str) {
+  // Find first bracket at depth 0
+  let bracketStart = -1;
+  let depth = 0;
 
-      // Find matching closing bracket
-      let bracketDepth = 1;
-      let j = i + 1;
-      while (j < chars.length && bracketDepth > 0) {
-        if (chars[j] === "[") bracketDepth++;
-        if (chars[j] === "]") bracketDepth--;
-        j++;
-      }
-
-      // Extract branch content
-      const branchContent = chars.substring(i + 1, j - 1);
-
-      // Split branches by | (but not inside nested brackets)
-      const branchStrings = splitByPipe(branchContent);
-
-      // Get any suffix after the bracket
-      const afterBracket = chars.substring(j);
-      const suffix = afterBracket.startsWith(",")
-        ? afterBracket
-            .substring(1)
-            .split(",")
-            .map((m) => m.trim())
-            .filter((m) => m)
-        : [];
-
-      // Create full sequences for each branch
-      for (const branchStr of branchStrings) {
-        const branchMoves = branchStr
-          .split(",")
-          .map((m) => m.trim())
-          .filter((m) => m);
-        result.push([...prefix, ...branchMoves, ...suffix]);
-      }
-
-      break; // For now, only support one branch point
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === "[") {
+      if (depth === 0) bracketStart = i;
+      depth++;
+    } else if (str[i] === "]") {
+      depth--;
     }
-    i++;
   }
 
-  return result.length > 0
-    ? result
-    : [movesString.split(",").map((m) => m.trim())];
+  // No brackets - return single sequence
+  if (bracketStart === -1) {
+    const moves = str
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => m);
+    return [moves];
+  }
+
+  // Find matching closing bracket
+  depth = 1;
+  let bracketEnd = bracketStart + 1;
+  while (bracketEnd < str.length && depth > 0) {
+    if (str[bracketEnd] === "[") depth++;
+    if (str[bracketEnd] === "]") depth--;
+    bracketEnd++;
+  }
+  bracketEnd--; // Point to the ]
+
+  // Extract parts
+  const prefix = str.substring(0, bracketStart);
+  const branchContent = str.substring(bracketStart + 1, bracketEnd);
+  const suffix = str.substring(bracketEnd + 1);
+
+  // Parse prefix moves
+  const prefixMoves = prefix
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m);
+
+  // Split branches by | at depth 0
+  const branches = splitByPipe(branchContent);
+
+  const results = [];
+
+  for (const branch of branches) {
+    // Each branch + suffix might have nested brackets - recursively expand
+    const branchWithSuffix = branch + suffix;
+    const expandedPaths = expandBranches(branchWithSuffix);
+
+    for (const path of expandedPaths) {
+      results.push([...prefixMoves, ...path]);
+    }
+  }
+
+  return results;
 }
 
 /**

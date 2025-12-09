@@ -81,7 +81,11 @@
           <div class="puzzle-instruction" id="${puzzleId}-instruction">${
         puzzleData.message || ""
       }</div>
-          ${hasBranches ? `<div id="${puzzleId}-branch-info" class="branch-info"></div>` : ''}
+          ${
+            hasBranches
+              ? `<div id="${puzzleId}-branch-info" class="branch-info"></div>`
+              : ""
+          }
           <div id="${puzzleId}-status" class="status-message status-neutral">${window.ChessWidget.t(
         "loading"
       )}</div>
@@ -177,10 +181,10 @@
   function updateBranchInfo(puzzleIndex) {
     const state = window.ChessWidget.Puzzles[puzzleIndex];
     if (!state || state.branches.length <= 1) return;
-    
+
     const branchInfoEl = document.getElementById(`${state.id}-branch-info`);
     if (!branchInfoEl) return;
-    
+
     const msg = window.ChessWidget.t("branchProgress")
       .replace("{current}", state.currentBranchIdx + 1)
       .replace("{total}", state.branches.length);
@@ -188,36 +192,81 @@
     branchInfoEl.classList.remove("branch-complete");
   }
 
-  // Reset puzzle for next branch
+  // Find common prefix length between two branches (nearest common ancestor)
+  function findCommonPrefixLength(branch1, branch2) {
+    const minLen = Math.min(branch1.length, branch2.length);
+    let commonLen = 0;
+
+    for (let i = 0; i < minLen; i++) {
+      if (branch1[i] === branch2[i]) {
+        commonLen = i + 1;
+      } else {
+        break;
+      }
+    }
+
+    return commonLen;
+  }
+
+  // Get position (FEN) after playing N moves from start
+  function getPositionAfterMoves(startFen, moves, count) {
+    const game = new Chess(startFen);
+    for (let i = 0; i < count && i < moves.length; i++) {
+      const move = moves[i];
+      const from = move.substring(0, 2);
+      const to = move.substring(2, 4);
+      game.move({ from, to, promotion: "q" });
+    }
+    return game.fen();
+  }
+
+  // Reset puzzle for next branch (resets to nearest common ancestor, not beginning)
   function startNextBranch(puzzleIndex) {
     const state = window.ChessWidget.Puzzles[puzzleIndex];
     if (!state) return;
-    
+
+    const prevBranchIdx = state.currentBranchIdx;
     state.currentBranchIdx++;
-    
+
     // Check if all branches completed
     if (state.currentBranchIdx >= state.branches.length) {
       updateStatus(puzzleIndex, window.ChessWidget.t("victory"), "correct");
       notifyParentSuccess(puzzleIndex);
       return;
     }
-    
-    // Reset game to initial position
-    state.game = new Chess(state.fen);
-    state.solution = state.branches[state.currentBranchIdx];
-    state.currentMoveIdx = 0;
-    state.isPlayerTurn = true;
+
+    // Find nearest common ancestor between previous and next branch
+    const prevBranch = state.branches[prevBranchIdx];
+    const nextBranch = state.branches[state.currentBranchIdx];
+    const commonPrefixLen = findCommonPrefixLength(prevBranch, nextBranch);
+
+    // Calculate branch point position
+    const branchPointFen = getPositionAfterMoves(
+      state.fen,
+      nextBranch,
+      commonPrefixLen
+    );
+    const branchPointMoveIdx = commonPrefixLen;
+
+    // Reset game to branch point (nearest common ancestor)
+    state.game = new Chess(branchPointFen);
+    state.solution = nextBranch;
+    state.currentMoveIdx = branchPointMoveIdx;
     state.waitingForOpponent = false;
-    
-    // Animate board reset
-    state.board.setPosition(state.fen, true).then(() => {
+
+    // At branch point, opponent responds differently - so it's opponent's turn
+    // The branch point is after player's move, before opponent's response
+    state.isPlayerTurn = false;
+
+    // Animate board reset to branch point
+    state.board.setPosition(branchPointFen, true).then(() => {
       clearHighlights(puzzleIndex);
       updateBranchInfo(puzzleIndex);
       updateStatus(puzzleIndex, window.ChessWidget.t("nextBranch"));
-      
+
+      // After brief pause, opponent makes their (different) response
       setTimeout(() => {
-        updateStatus(puzzleIndex, window.ChessWidget.t("yourTurn"));
-        enablePlayerInput(puzzleIndex);
+        makeOpponentMove(puzzleIndex);
       }, 800);
     });
   }
@@ -313,11 +362,16 @@
 
         if (state.currentMoveIdx >= state.solution.length) {
           // Branch/puzzle complete with checkmate
-          if (state.branches.length > 1 && state.currentBranchIdx < state.branches.length - 1) {
+          if (
+            state.branches.length > 1 &&
+            state.currentBranchIdx < state.branches.length - 1
+          ) {
             // More branches to solve
             updateStatus(
               puzzleIndex,
-              window.ChessWidget.t("checkmate") + "! " + window.ChessWidget.t("branchComplete"),
+              window.ChessWidget.t("checkmate") +
+                "! " +
+                window.ChessWidget.t("branchComplete"),
               "checkmate"
             );
             state.waitingForOpponent = false;
@@ -348,9 +402,16 @@
 
       if (state.currentMoveIdx >= state.solution.length) {
         // Branch complete (no checkmate)
-        if (state.branches.length > 1 && state.currentBranchIdx < state.branches.length - 1) {
+        if (
+          state.branches.length > 1 &&
+          state.currentBranchIdx < state.branches.length - 1
+        ) {
           // More branches to solve
-          updateStatus(puzzleIndex, window.ChessWidget.t("branchComplete"), "correct");
+          updateStatus(
+            puzzleIndex,
+            window.ChessWidget.t("branchComplete"),
+            "correct"
+          );
           state.waitingForOpponent = false;
           setTimeout(() => startNextBranch(puzzleIndex), 1500);
         } else {
@@ -404,9 +465,12 @@
           if (kingSquare)
             highlightSquare(puzzleIndex, kingSquare, "highlight-check");
           state.currentMoveIdx++;
-          
+
           // Check if more branches to solve
-          if (state.branches.length > 1 && state.currentBranchIdx < state.branches.length - 1) {
+          if (
+            state.branches.length > 1 &&
+            state.currentBranchIdx < state.branches.length - 1
+          ) {
             updateStatus(
               puzzleIndex,
               window.ChessWidget.t("checkmate") +

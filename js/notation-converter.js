@@ -152,62 +152,65 @@ function convertMovesToLAN(fen, movesString) {
 }
 
 /**
- * Converts moves string with branch syntax to LAN format
- * Branch syntax: "move1,[branchA1,branchA2|branchB1,branchB2]"
+ * Converts moves string with nested branch syntax to LAN format
+ * Supports nested brackets: "move1,[branchA|branchB,[subB1|subB2]]"
  * @param {string} fen - The starting FEN position
  * @param {string} movesString - Moves string with branch syntax
- * @returns {string} - Converted string in LAN format
+ * @returns {string} - Converted string in LAN format (preserving bracket structure)
  */
 function convertMovesWithBranchesToLAN(fen, movesString) {
-  // Find the bracket section
-  const bracketStart = movesString.indexOf("[");
-  const bracketEnd = movesString.lastIndexOf("]");
-
-  if (bracketStart === -1 || bracketEnd === -1) {
-    return convertMovesToLAN(fen, movesString);
-  }
-
-  // Split into prefix, branch content, and suffix
-  const prefix = movesString.substring(0, bracketStart);
-  const branchContent = movesString.substring(bracketStart + 1, bracketEnd);
-  const suffix = movesString.substring(bracketEnd + 1);
-
-  // Convert prefix moves (before the branch)
-  const prefixMoves = prefix
-    .split(",")
-    .map((m) => m.trim())
-    .filter((m) => m);
-
   const game = new Chess(fen);
-  const convertedPrefix = [];
+  return convertBranchesRecursive(game, movesString);
+}
 
-  // Check if already LAN
-  const isAlreadyLAN = prefixMoves.length > 0 && isLANMove(prefixMoves[0]);
+/**
+ * Recursively convert a moves string with nested brackets
+ * @param {Chess} game - Chess game at current position
+ * @param {string} str - Moves string (may contain brackets)
+ * @returns {string} - Converted string in LAN format
+ */
+function convertBranchesRecursive(game, str) {
+  // Find first bracket at depth 0
+  let bracketStart = -1;
+  let depth = 0;
 
-  if (!isAlreadyLAN) {
-    for (const move of prefixMoves) {
-      const lan = sanToLAN(game, move);
-      if (lan === null) {
-        console.error(`Invalid prefix move: ${move} in position ${game.fen()}`);
-        return movesString;
-      }
-      convertedPrefix.push(lan);
-      game.move(move);
-    }
-  } else {
-    // Already LAN - just play through the moves
-    for (const move of prefixMoves) {
-      convertedPrefix.push(move);
-      const from = move.substring(0, 2);
-      const to = move.substring(2, 4);
-      game.move({ from, to, promotion: "q" });
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === "[") {
+      if (depth === 0) bracketStart = i;
+      depth++;
+    } else if (str[i] === "]") {
+      depth--;
     }
   }
 
-  // Save position after prefix for each branch
+  // No brackets - convert simple moves
+  if (bracketStart === -1) {
+    return convertSimpleMoves(game, str);
+  }
+
+  // Find matching closing bracket
+  depth = 1;
+  let bracketEnd = bracketStart + 1;
+  while (bracketEnd < str.length && depth > 0) {
+    if (str[bracketEnd] === "[") depth++;
+    if (str[bracketEnd] === "]") depth--;
+    bracketEnd++;
+  }
+  bracketEnd--; // Point to the ]
+
+  // Extract parts
+  const prefix = str.substring(0, bracketStart);
+  const branchContent = str.substring(bracketStart + 1, bracketEnd);
+  const suffix = str.substring(bracketEnd + 1);
+
+  // Convert prefix and play through moves
+  const convertedPrefix = convertSimpleMoves(game, prefix);
+  playThroughMoves(game, convertedPrefix);
+
+  // Save position after prefix
   const positionAfterPrefix = game.fen();
 
-  // Split branches by | (not inside nested brackets)
+  // Split branches by | at depth 0
   const branches = splitByPipeOutsideBrackets(branchContent);
   const convertedBranches = [];
 
@@ -215,53 +218,84 @@ function convertMovesWithBranchesToLAN(fen, movesString) {
     // Reset to position after prefix for each branch
     game.load(positionAfterPrefix);
 
-    const branchMoves = branch
-      .split(",")
-      .map((m) => m.trim())
-      .filter((m) => m);
-    const convertedBranchMoves = [];
-
-    for (const move of branchMoves) {
-      if (isAlreadyLAN || isLANMove(move)) {
-        convertedBranchMoves.push(move);
-        const from = move.substring(0, 2);
-        const to = move.substring(2, 4);
-        game.move({ from, to, promotion: "q" });
-      } else {
-        const lan = sanToLAN(game, move);
-        if (lan === null) {
-          console.error(
-            `Invalid branch move: ${move} in position ${game.fen()}`
-          );
-          return movesString;
-        }
-        convertedBranchMoves.push(lan);
-        game.move(move);
-      }
-    }
-
-    convertedBranches.push(convertedBranchMoves.join(","));
+    // Recursively convert this branch (may contain nested brackets)
+    const convertedBranch = convertBranchesRecursive(game, branch);
+    convertedBranches.push(convertedBranch);
   }
 
-  // Convert suffix if present
+  // Reset to position after prefix for suffix conversion
+  game.load(positionAfterPrefix);
+
+  // Convert suffix if present (recursively, as it may have brackets)
   let convertedSuffix = "";
-  if (suffix && suffix.startsWith(",")) {
-    const suffixMoves = suffix
-      .substring(1)
-      .split(",")
-      .map((m) => m.trim())
-      .filter((m) => m);
-    // Note: suffix conversion would need position context from end of branches
-    // For now, just pass through (suffix is rare in branch syntax)
-    convertedSuffix = suffix;
+  if (suffix) {
+    // Need to play through one branch to get correct position for suffix
+    // (all branches should end at same move count for suffix to make sense)
+    if (convertedBranches.length > 0) {
+      playThroughMoves(game, convertedBranches[0]);
+    }
+    convertedSuffix = convertBranchesRecursive(game, suffix);
   }
 
   // Reconstruct the string
-  const prefixStr =
-    convertedPrefix.length > 0 ? convertedPrefix.join(",") + "," : "";
+  const prefixStr = convertedPrefix ? convertedPrefix + "," : "";
   const branchStr = "[" + convertedBranches.join("|") + "]";
 
   return prefixStr + branchStr + convertedSuffix;
+}
+
+/**
+ * Convert simple comma-separated moves (no brackets) to LAN
+ */
+function convertSimpleMoves(game, str) {
+  const moves = str
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m);
+
+  if (moves.length === 0) return "";
+
+  const convertedMoves = [];
+  const tempGame = new Chess(game.fen());
+
+  for (const move of moves) {
+    if (isLANMove(move)) {
+      convertedMoves.push(move);
+      const from = move.substring(0, 2);
+      const to = move.substring(2, 4);
+      tempGame.move({ from, to, promotion: "q" });
+    } else {
+      const lan = sanToLAN(tempGame, move);
+      if (lan === null) {
+        console.error(`Invalid move: ${move} in position ${tempGame.fen()}`);
+        return str; // Return original on error
+      }
+      convertedMoves.push(lan);
+      tempGame.move(move);
+    }
+  }
+
+  return convertedMoves.join(",");
+}
+
+/**
+ * Play through comma-separated LAN moves on a game
+ */
+function playThroughMoves(game, movesStr) {
+  const moves = movesStr
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m);
+
+  for (const move of moves) {
+    if (isLANMove(move)) {
+      const from = move.substring(0, 2);
+      const to = move.substring(2, 4);
+      game.move({ from, to, promotion: "q" });
+    } else {
+      game.move(move);
+    }
+  }
 }
 
 /**

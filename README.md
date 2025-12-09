@@ -6,7 +6,8 @@ An embeddable chess puzzle widget that allows users to solve chess puzzles inter
 
 - 🎯 Interactive chess puzzles with drag-and-drop or click-to-move
 - 📝 Support for both **SAN** (Short Algebraic Notation: `Nf3`, `Qxd5`) and **LAN** (Long Algebraic Notation: `g1f3`, `d1d5`)
-- 🌿 **Branching puzzles** - opponent can respond differently, player must solve all variations
+- 🌿 **Branching puzzles** with nested variations - opponent can respond differently, player must solve all leaves
+- 🎯 **Smart transitions** - board resets to nearest common ancestor between variations
 - 🌍 Multi-language support (English and Russian)
 - 📱 Responsive design for mobile and desktop
 - 🔗 Easy iframe embedding
@@ -60,34 +61,52 @@ The widget automatically detects and converts between formats.
 
 ### Branching Puzzles
 
-Puzzles can have multiple variations where the opponent responds differently. The player must solve ALL branches to complete the puzzle.
+Puzzles can have multiple variations where the opponent responds differently. The player must solve ALL branches (leaves of the variation tree) to complete the puzzle.
 
-**Syntax:** Use square brackets `[...]` to define branches, with `|` separating alternatives:
-
-```
-playerMove,[opponentResp1,playerReply1|opponentResp2,playerReply2,...]
-```
-
-**Example:**
+**Syntax:** Use square brackets `[...]` to define branches, with `|` separating alternatives. Supports **nested branches** for complex variation trees:
 
 ```
-d8h4,[g4h4,g8g1|h2h3,g8g4,f5g4,h4g4]
+playerMove,[opponentResp1,playerReply1|opponentResp2,playerReply2,[nestedOpp1,nestedReply1|nestedOpp2,nestedReply2]]
 ```
 
-This means:
+**Simple Example:**
 
-1. Player plays `d8h4` (Qh4)
-2. **Branch 1:** Opponent plays `g4h4` (Rxh4), player responds `g8g1` (Rg1#)
-3. **Branch 2:** Opponent plays `h2h3`, player plays `g8g4` (Rxg4+), opponent `f5g4` (Qxg4), player `h4g4` (Qxg4)
+```
+Qh4,[Rxh4,Rg1#|h3,Qxh3#]
+```
 
-When Branch 1 is complete, the board resets and the player must solve Branch 2. The puzzle shows "Variation 1 of 2" progress indicator.
+This creates 2 variations:
+1. Player: Qh4 → Opponent: Rxh4 → Player: Rg1#
+2. Player: Qh4 → Opponent: h3 → Player: Qxh3#
+
+**Nested Example:**
+
+```
+Re8,[Kh7,Qd3,f5,Qxc2|Bf8,Rxf8,[Kg7,Rxf7|Kxf8,Nf5,[Kg8,Qf8,[Kxf8,Rd8#|Kh7,Qg7#]|Ke8,Ng7#]]]
+```
+
+This creates 5 variations (all leaves of the tree):
+1. `Re8, Kh7, Qd3, f5, Qxc2`
+2. `Re8, Bf8, Rxf8, Kg7, Rxf7`
+3. `Re8, Bf8, Rxf8, Kxf8, Nf5, Kg8, Qf8, Kxf8, Rd8#`
+4. `Re8, Bf8, Rxf8, Kxf8, Nf5, Kg8, Qf8, Kh7, Qg7#`
+5. `Re8, Bf8, Rxf8, Kxf8, Nf5, Ke8, Ng7#`
+
+**Smart Branch Transitions:**
+
+When switching between variations, the board resets to the **nearest common ancestor** (not the beginning!). For example:
+- Variation 3 → 4: Both share `Re8, Bf8, Rxf8, Kxf8, Nf5, Kg8, Qf8`, so it resets there
+- Variation 2 → 3: Both share `Re8, Bf8, Rxf8`, so it resets there
+
+This means players don't have to replay moves they've already solved!
 
 **Features:**
 
-- Progress indicator shows current branch / total branches
-- Board automatically resets between branches
-- Victory only when ALL branches are solved
+- Progress indicator shows current variation / total variations
+- Board resets to nearest common ancestor between variations
+- Victory only when ALL variations are solved
 - Works with both SAN and LAN notation
+- Supports arbitrarily deep nesting
 
 ## Examples
 
@@ -108,9 +127,14 @@ When Branch 1 is complete, the board resets and the player must solve Branch 2. 
 ### Branching Puzzle
 
 ```html
-<!-- Puzzle with 2 variations - opponent can respond differently -->
+<!-- Simple branching: 2 variations -->
 <iframe
-  src="index.html?fen=r2q2rk/ppp4p/3p4/2b2Q2/3pPPR1/2P2n2/PP3P1P/RNB4K%20b%20-%20-%200%201&moves=d8h4,[g4h4,g8g1|h2h3,g8g4,f5g4,h4g4]&message=Find%20the%20winning%20move%20(2%20variations)&lang=en"
+  src="index.html?fen=r2q2rk/ppp4p/3p4/2b2Q2/3pPPR1/2P2n2/PP3P1P/RNB4K%20b%20-%20-%200%201&moves=Qh4,[Rxh4,Rg1%23|h3,Qxh3%23]&message=Find%20the%20winning%20move%20(2%20variations)&lang=en"
+></iframe>
+
+<!-- Nested branching: 5 variations with deep tree -->
+<iframe
+  src="index.html?fen=6k1/5pb1/1p1N3p/p5p1/5q2/Q6P/PPr5/3RR2K%20w%20-%20-%200%201&moves=Re8,[Kh7,Qd3,f5,Qxc2|Bf8,Rxf8,[Kg7,Rxf7,Qxf7,Nxf7|Kxf8,Nf5,[Kg8,Qf8,[Kxf8,Rd8%23|Kh7,Qg7%23]|Ke8,Ng7%23]]]&message=Find%20the%20winning%20combination%20(5%20variations)&lang=en"
 ></iframe>
 ```
 
