@@ -80,7 +80,7 @@ This means:
 2. **Branch 1:** Opponent plays `g4h4` (Rxh4), player responds `g8g1` (Rg1#)
 3. **Branch 2:** Opponent plays `h2h3`, player plays `g8g4` (Rxg4+), opponent `f5g4` (Qxg4), player `h4g4` (Qxg4)
 
-When Branch 1 is complete, the board resets and the player must solve Branch 2. The puzzle shows "Вариант 1 из 2" (Variation 1 of 2) progress indicator.
+When Branch 1 is complete, the board resets and the player must solve Branch 2. The puzzle shows "Variation 1 of 2" progress indicator.
 
 **Features:**
 
