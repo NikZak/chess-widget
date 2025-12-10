@@ -164,28 +164,42 @@ function convertMovesWithBranchesToLAN(fen, movesString) {
 }
 
 /**
- * Recursively convert a moves string with nested brackets
+ * Recursively convert a moves string with nested brackets and alternatives
  * @param {Chess} game - Chess game at current position
- * @param {string} str - Moves string (may contain brackets)
+ * @param {string} str - Moves string (may contain brackets [] or alternatives {})
  * @returns {string} - Converted string in LAN format
  */
 function convertBranchesRecursive(game, str) {
-  // Find first bracket at depth 0
+  // Find first bracket or curly brace at depth 0
   let bracketStart = -1;
-  let depth = 0;
+  let curlyStart = -1;
+  let bracketDepth = 0;
+  let curlyDepth = 0;
 
   for (let i = 0; i < str.length; i++) {
     if (str[i] === "[") {
-      if (depth === 0) bracketStart = i;
-      depth++;
+      if (bracketDepth === 0 && curlyDepth === 0 && bracketStart === -1)
+        bracketStart = i;
+      bracketDepth++;
     } else if (str[i] === "]") {
-      depth--;
+      bracketDepth--;
+    } else if (str[i] === "{") {
+      if (curlyDepth === 0 && bracketDepth === 0 && curlyStart === -1)
+        curlyStart = i;
+      curlyDepth++;
+    } else if (str[i] === "}") {
+      curlyDepth--;
     }
   }
 
-  // No brackets - convert simple moves
-  if (bracketStart === -1) {
+  // No brackets or curly braces - convert simple moves
+  if (bracketStart === -1 && curlyStart === -1) {
     return convertSimpleMoves(game, str);
+  }
+
+  // Handle curly braces (player alternatives) first if they come before brackets
+  if (curlyStart !== -1 && (bracketStart === -1 || curlyStart < bracketStart)) {
+    return convertAlternativesRecursive(game, str, curlyStart);
   }
 
   // Find matching closing bracket
@@ -245,6 +259,66 @@ function convertBranchesRecursive(game, str) {
 }
 
 /**
+ * Convert player alternatives {move1|move2} to LAN format
+ * @param {Chess} game - Chess game at current position
+ * @param {string} str - Moves string with alternatives
+ * @param {number} curlyStart - Position of opening {
+ * @returns {string} - Converted string in LAN format
+ */
+function convertAlternativesRecursive(game, str, curlyStart) {
+  // Find matching closing curly brace
+  let depth = 1;
+  let curlyEnd = curlyStart + 1;
+  while (curlyEnd < str.length && depth > 0) {
+    if (str[curlyEnd] === "{") depth++;
+    if (str[curlyEnd] === "}") depth--;
+    curlyEnd++;
+  }
+  curlyEnd--; // Point to the }
+
+  // Extract parts
+  const prefix = str.substring(0, curlyStart);
+  const alternativesContent = str.substring(curlyStart + 1, curlyEnd);
+  const suffix = str.substring(curlyEnd + 1);
+
+  // Convert prefix and play through moves
+  const convertedPrefix = convertSimpleMoves(game, prefix);
+  playThroughMoves(game, convertedPrefix);
+
+  // Save position before alternatives (all alternatives start from same position)
+  const positionBeforeAlternatives = game.fen();
+
+  // Split alternatives by | (no nesting expected inside alternatives)
+  const alternatives = alternativesContent.split("|").map((a) => a.trim());
+  const convertedAlternatives = [];
+
+  for (const alt of alternatives) {
+    // Reset to position before alternatives
+    game.load(positionBeforeAlternatives);
+    // Convert single move
+    const convertedAlt = convertSimpleMoves(game, alt);
+    convertedAlternatives.push(convertedAlt);
+  }
+
+  // Reset to position before alternatives for suffix
+  game.load(positionBeforeAlternatives);
+
+  // Play one alternative to get position for suffix
+  if (convertedAlternatives.length > 0) {
+    playThroughMoves(game, convertedAlternatives[0]);
+  }
+
+  // Convert suffix (recursively, may have more brackets/alternatives)
+  const convertedSuffix = suffix ? convertBranchesRecursive(game, suffix) : "";
+
+  // Reconstruct the string
+  const prefixStr = convertedPrefix ? convertedPrefix + "," : "";
+  const altStr = "{" + convertedAlternatives.join("|") + "}";
+
+  return prefixStr + altStr + convertedSuffix;
+}
+
+/**
  * Convert simple comma-separated moves (no brackets) to LAN
  */
 function convertSimpleMoves(game, str) {
@@ -299,17 +373,20 @@ function playThroughMoves(game, movesStr) {
 }
 
 /**
- * Split string by | but not inside nested brackets
+ * Split string by | but not inside nested brackets or curly braces
  */
 function splitByPipeOutsideBrackets(str) {
   const result = [];
   let current = "";
-  let depth = 0;
+  let bracketDepth = 0;
+  let curlyDepth = 0;
 
   for (const char of str) {
-    if (char === "[") depth++;
-    else if (char === "]") depth--;
-    else if (char === "|" && depth === 0) {
+    if (char === "[") bracketDepth++;
+    else if (char === "]") bracketDepth--;
+    else if (char === "{") curlyDepth++;
+    else if (char === "}") curlyDepth--;
+    else if (char === "|" && bracketDepth === 0 && curlyDepth === 0) {
       result.push(current);
       current = "";
       continue;

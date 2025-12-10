@@ -33,6 +33,7 @@ const translations = {
 // Default puzzles (Long Algebraic Notation - LAN)
 // Branch syntax: [opponentMove1,playerReply1|opponentMove2,playerReply2]
 // Branches represent different opponent responses - all must be solved
+// Player alternatives syntax: {move1|move2} - any of these player moves is correct
 const DEFAULT_PUZZLES = [
   {
     fen: "r3k2r/1b1p1pp1/3qp3/p1bP4/Pp3B2/6P1/1PP1QPB1/R4RK1 b kq - 0 1",
@@ -76,7 +77,7 @@ const DEFAULT_PUZZLES_2 = [
   {
     fen: "6k1/5pb1/1p1N3p/p5p1/5q2/Q6P/PPr5/3RR2K w - - 0 1",
     moves:
-      "Re8, [Kh7, Qd3, f5, Qxc2|Bf8, Rxf8, [Kg7, Rxf7, Qxf7, Nxf7| Kxf8, Nf5, [Kg8, Qf8, [Kxf8, Rd8#|Kh7, Qg7#]|Ke8, Ng7#]]]",
+      "Re8, [Kh7, Qd3, f5, Qxc2|Bf8, Rxf8, [Kg7, Rxf7, Qxf7, Nxf7| Kxf8, Nf5, [Kg8, Qf8, [Kxf8, Rd8#|Kh7, Qg7#] | Ke8, {Ng7# | Qe7#}]]]",
     message: "Найдите выигрывающую комбинацию",
   },
 ];
@@ -125,9 +126,11 @@ function parsePuzzlesFromURL() {
 }
 
 /**
- * Parse moves string with branch syntax (supports nested branches)
+ * Parse moves string with branch syntax (supports nested branches and player alternatives)
  * Syntax: "move1,[branchA|branchB,[subBranch1|subBranch2]]"
+ * Player alternatives syntax: "{move1|move2}" - any move in curly braces is correct
  * Returns array of complete move sequences (all leaves of the tree)
+ * Alternative moves are stored as arrays: ["e2e4", ["g7g8", "e7e8"]]
  *
  * Example: "Re8,[Kh7,Qd3|Bf8,Rxf8,[Kg7,Rxf7|Kxf8,Nf5]]" returns 3 branches:
  * [
@@ -135,10 +138,15 @@ function parsePuzzlesFromURL() {
  *   ["Re8", "Bf8", "Rxf8", "Kg7", "Rxf7"],
  *   ["Re8", "Bf8", "Rxf8", "Kxf8", "Nf5"]
  * ]
+ *
+ * Example with alternatives: "Re8,Kh7,{Ng7#|Qe7#}" returns:
+ * [
+ *   ["Re8", "Kh7", ["Ng7#", "Qe7#"]]
+ * ]
  */
 function parseBranchMoves(movesString) {
-  // No brackets - single sequence
-  if (!movesString.includes("[")) {
+  // No brackets or curly braces - single sequence
+  if (!movesString.includes("[") && !movesString.includes("{")) {
     return [
       movesString
         .split(",")
@@ -153,23 +161,33 @@ function parseBranchMoves(movesString) {
 
 /**
  * Recursively expand a moves string with nested brackets into all possible paths
+ * Also handles player alternatives {move1|move2} which are stored as arrays
  */
 function expandBranches(str) {
-  // Find first bracket at depth 0
+  // Find first bracket or curly brace at depth 0
   let bracketStart = -1;
-  let depth = 0;
+  let curlyStart = -1;
+  let bracketDepth = 0;
+  let curlyDepth = 0;
 
   for (let i = 0; i < str.length; i++) {
     if (str[i] === "[") {
-      if (depth === 0) bracketStart = i;
-      depth++;
+      if (bracketDepth === 0 && curlyDepth === 0 && bracketStart === -1)
+        bracketStart = i;
+      bracketDepth++;
     } else if (str[i] === "]") {
-      depth--;
+      bracketDepth--;
+    } else if (str[i] === "{") {
+      if (curlyDepth === 0 && bracketDepth === 0 && curlyStart === -1)
+        curlyStart = i;
+      curlyDepth++;
+    } else if (str[i] === "}") {
+      curlyDepth--;
     }
   }
 
-  // No brackets - return single sequence
-  if (bracketStart === -1) {
+  // No brackets or curly braces - return single sequence
+  if (bracketStart === -1 && curlyStart === -1) {
     const moves = str
       .split(",")
       .map((m) => m.trim())
@@ -177,8 +195,13 @@ function expandBranches(str) {
     return [moves];
   }
 
+  // Handle curly braces (player alternatives) first if they come before brackets
+  if (curlyStart !== -1 && (bracketStart === -1 || curlyStart < bracketStart)) {
+    return expandAlternatives(str, curlyStart);
+  }
+
   // Find matching closing bracket
-  depth = 1;
+  let depth = 1;
   let bracketEnd = bracketStart + 1;
   while (bracketEnd < str.length && depth > 0) {
     if (str[bracketEnd] === "[") depth++;
@@ -192,11 +215,8 @@ function expandBranches(str) {
   const branchContent = str.substring(bracketStart + 1, bracketEnd);
   const suffix = str.substring(bracketEnd + 1);
 
-  // Parse prefix moves
-  const prefixMoves = prefix
-    .split(",")
-    .map((m) => m.trim())
-    .filter((m) => m);
+  // Parse prefix moves (may contain alternatives)
+  const prefixMoves = parseMovesWithAlternatives(prefix);
 
   // Split branches by | at depth 0
   const branches = splitByPipe(branchContent);
@@ -217,17 +237,121 @@ function expandBranches(str) {
 }
 
 /**
- * Split string by | but not inside brackets
+ * Expand player alternatives {move1|move2} - stores alternatives as arrays
+ * Does not create new branches, just marks the move as having alternatives
+ */
+function expandAlternatives(str, curlyStart) {
+  // Find matching closing curly brace
+  let depth = 1;
+  let curlyEnd = curlyStart + 1;
+  while (curlyEnd < str.length && depth > 0) {
+    if (str[curlyEnd] === "{") depth++;
+    if (str[curlyEnd] === "}") depth--;
+    curlyEnd++;
+  }
+  curlyEnd--; // Point to the }
+
+  // Extract parts
+  const prefix = str.substring(0, curlyStart);
+  const alternativesContent = str.substring(curlyStart + 1, curlyEnd);
+  const suffix = str.substring(curlyEnd + 1);
+
+  // Parse prefix moves
+  const prefixMoves = parseMovesWithAlternatives(prefix);
+
+  // Parse alternatives - split by | and store as array
+  const alternatives = alternativesContent
+    .split("|")
+    .map((a) => a.trim())
+    .filter((a) => a);
+
+  // Store alternatives as an array (not a string)
+  const alternativesMove =
+    alternatives.length === 1 ? alternatives[0] : alternatives;
+
+  // Continue parsing suffix (may have more brackets/alternatives)
+  const suffixResults = suffix.trim()
+    ? expandBranches(suffix.startsWith(",") ? suffix.substring(1) : suffix)
+    : [[]];
+
+  const results = [];
+  for (const suffixPath of suffixResults) {
+    results.push([...prefixMoves, alternativesMove, ...suffixPath]);
+  }
+
+  return results;
+}
+
+/**
+ * Parse a simple comma-separated moves string, handling any {alternatives} within
+ */
+function parseMovesWithAlternatives(str) {
+  if (!str.includes("{")) {
+    return str
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => m);
+  }
+
+  const result = [];
+  let current = "";
+  let curlyDepth = 0;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === "{") {
+      curlyDepth++;
+      current += char;
+    } else if (char === "}") {
+      curlyDepth--;
+      current += char;
+    } else if (char === "," && curlyDepth === 0) {
+      if (current.trim()) {
+        result.push(parseAlternativeMove(current.trim()));
+      }
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  if (current.trim()) {
+    result.push(parseAlternativeMove(current.trim()));
+  }
+
+  return result;
+}
+
+/**
+ * Parse a single move that may be {alt1|alt2} or just a plain move
+ */
+function parseAlternativeMove(moveStr) {
+  if (moveStr.startsWith("{") && moveStr.endsWith("}")) {
+    const content = moveStr.substring(1, moveStr.length - 1);
+    const alts = content
+      .split("|")
+      .map((a) => a.trim())
+      .filter((a) => a);
+    return alts.length === 1 ? alts[0] : alts;
+  }
+  return moveStr;
+}
+
+/**
+ * Split string by | but not inside brackets or curly braces
  */
 function splitByPipe(str) {
   const result = [];
   let current = "";
-  let depth = 0;
+  let bracketDepth = 0;
+  let curlyDepth = 0;
 
   for (const char of str) {
-    if (char === "[") depth++;
-    else if (char === "]") depth--;
-    else if (char === "|" && depth === 0) {
+    if (char === "[") bracketDepth++;
+    else if (char === "]") bracketDepth--;
+    else if (char === "{") curlyDepth++;
+    else if (char === "}") curlyDepth--;
+    else if (char === "|" && bracketDepth === 0 && curlyDepth === 0) {
       result.push(current);
       current = "";
       continue;

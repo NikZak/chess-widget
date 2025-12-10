@@ -347,9 +347,12 @@
     if (move === null) return false;
 
     const userMoveString = source + target;
-    const correctMoveString = state.solution[state.currentMoveIdx];
+    const expectedMove = state.solution[state.currentMoveIdx];
 
-    if (userMoveString === correctMoveString) {
+    // Check if move is correct - handle both single moves and alternatives
+    const isCorrectMove = isMoveCorrect(userMoveString, expectedMove);
+
+    if (isCorrectMove) {
       state.currentMoveIdx++;
 
       // Highlight the valid move (From and To)
@@ -516,6 +519,24 @@
         state.isPlayerTurn = true;
         enablePlayerInput(puzzleIndex);
       });
+  }
+
+  // --- MOVE VALIDATION HELPERS ---
+
+  /**
+   * Check if a player move matches the expected move
+   * Handles both single moves and alternatives (arrays)
+   * @param {string} userMove - The move the user played (e.g., "e2e4")
+   * @param {string|Array} expectedMove - Expected move or array of alternatives
+   * @returns {boolean} - True if move is correct
+   */
+  function isMoveCorrect(userMove, expectedMove) {
+    if (Array.isArray(expectedMove)) {
+      // Multiple alternatives - any match is correct
+      return expectedMove.some((alt) => userMove === alt);
+    }
+    // Single expected move
+    return userMove === expectedMove;
   }
 
   // --- CUSTOM HIGHLIGHTING SYSTEM ---

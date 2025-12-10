@@ -7,6 +7,7 @@ An embeddable chess puzzle widget that allows users to solve chess puzzles inter
 - 🎯 Interactive chess puzzles with drag-and-drop or click-to-move
 - 📝 Support for both **SAN** (Short Algebraic Notation: `Nf3`, `Qxd5`) and **LAN** (Long Algebraic Notation: `g1f3`, `d1d5`)
 - 🌿 **Branching puzzles** with nested variations - opponent can respond differently, player must solve all leaves
+- ✨ **Player alternatives** `{move1|move2}` - multiple correct moves (e.g., two ways to checkmate)
 - 🎯 **Smart transitions** - board resets to nearest common ancestor between variations
 - 🌍 Multi-language support (English and Russian)
 - 📱 Responsive design for mobile and desktop
@@ -111,6 +112,36 @@ This means players don't have to replay moves they've already solved!
 - Works with both SAN and LAN notation
 - Supports arbitrarily deep nesting
 
+### Player Alternatives
+
+Sometimes there are multiple correct moves for the player (e.g., two ways to checkmate). Use curly braces `{...}` to define player alternatives - any of these moves is accepted as correct.
+
+**Syntax:** `{move1|move2|move3}`
+
+**Example:**
+
+```
+Qh7,Kf8,{Qf7#|Qh8#}
+```
+
+This means: Player plays Qh7, opponent plays Kf8, then **either** Qf7# or Qh8# is checkmate - both are correct answers.
+
+**Difference from Branches:**
+
+- `[...]` = **Opponent** variations → creates multiple branches, ALL must be solved
+- `{...}` = **Player** alternatives → any single move is correct, NO extra branches created
+
+**Combined Example:**
+
+```
+Re8,[Kh7,{Qd3|Qe4}|Bf8,Rxf8,{Ng7#|Qf8#}]
+```
+
+This has 2 branches (from opponent variations), but within each branch the player can choose from alternatives:
+
+1. Branch 1: `Re8 → Kh7 → Qd3 or Qe4`
+2. Branch 2: `Re8 → Bf8 → Rxf8 → Ng7# or Qf8#`
+
 ## Examples
 
 ### Single Puzzle
@@ -138,6 +169,15 @@ This means players don't have to replay moves they've already solved!
 <!-- Nested branching: 5 variations with deep tree -->
 <iframe
   src="index.html?fen=6k1/5pb1/1p1N3p/p5p1/5q2/Q6P/PPr5/3RR2K%20w%20-%20-%200%201&moves=Re8,[Kh7,Qd3,f5,Qxc2|Bf8,Rxf8,[Kg7,Rxf7,Qxf7,Nxf7|Kxf8,Nf5,[Kg8,Qf8,[Kxf8,Rd8%23|Kh7,Qg7%23]|Ke8,Ng7%23]]]&message=Find%20the%20winning%20combination%20(5%20variations)&lang=en"
+></iframe>
+```
+
+### Player Alternatives (Multiple Correct Answers)
+
+```html
+<!-- Two ways to checkmate - either Qf7# or Qh8# -->
+<iframe
+  src="index.html?fen=r4rk1/1bqn1pbp/p2p2p1/1p2p1B1/4P3/2N2N1Q/PPP2PPP/3RR1K1%20w%20-%20-%200%201&moves=Qh7,Kf8,{Qf7%23|Qh8%23}&message=Mate%20in%202%20(two%20ways%20to%20checkmate)&lang=en"
 ></iframe>
 ```
 
