@@ -1,9 +1,6 @@
 /**
  * Main chess widget logic
- * FIXED:
- * 1. Replaced library 'addMarker' with custom DOM-based highlighting.
- * 2. This fixes the "state.board.addMarker is not a function" error.
- * 3. Works by calculating percentage positions (12.5% per square).
+ * Uses chessboard.js built-in marker system for square highlighting
  */
 
 (function () {
@@ -20,25 +17,30 @@
     t: null,
   };
 
-  // --- CSS INJECTION FOR HIGHLIGHTS ---
-  // We inject styles for our custom highlights so we don't depend on external CSS
+  // --- MARKER DEFINITIONS ---
+  // Define markers for different highlight types using chessboard.js marker system
+  const goodMarker = { class: "good-square", slice: "markerSquare" };
+  const badMarker = { class: "bad-square", slice: "markerSquare" };
+  const checkMarker = { class: "check-square", slice: "markerSquare" };
+
+  // --- CSS INJECTION FOR MARKERS ---
+  // Styles for chessboard.js markers (SVG elements)
+  // The Markers extension adds class "marker" + the marker type class
   const style = document.createElement("style");
   style.innerHTML = `
-    .custom-highlight-layer {
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      pointer-events: none; /* Let clicks pass through to the board */
-      z-index: 1; /* Below pieces (usually z-index 10+), above board bg */
+    /* Marker styles - these target the chessboard.js SVG marker elements */
+    .cm-chessboard .marker.good-square,
+    .cm-chessboard .marker.good-square use {
+      fill: rgba(155, 199, 0, 0.41) !important; /* Greenish for valid moves */
     }
-    .custom-highlight-square {
-      position: absolute;
-      width: 12.5%; 
-      height: 12.5%;
-      display: block;
+    .cm-chessboard .marker.bad-square,
+    .cm-chessboard .marker.bad-square use {
+      fill: rgba(255, 255, 0, 0.4) !important; /* Yellowish for source square */
     }
-    .highlight-source { background-color: rgba(255, 255, 0, 0.4); } /* Yellowish */
-    .highlight-move { background-color: rgba(155, 199, 0, 0.41); } /* Greenish */
-    .highlight-check { background-color: rgba(255, 0, 0, 0.5); }   /* Red */
+    .cm-chessboard .marker.check-square,
+    .cm-chessboard .marker.check-square use {
+      fill: rgba(255, 0, 0, 0.5) !important; /* Red for check */
+    }
     
     /* Branch info styling */
     .branch-info {
@@ -89,7 +91,7 @@
           <div id="${puzzleId}-status" class="status-message status-neutral">${window.ChessWidget.t(
         "loading"
       )}</div>
-          <div id="${puzzleId}-board" style="position: relative;"></div> <!-- Relative for absolute overlay -->
+          <div id="${puzzleId}-board"></div>
         </div>
       `;
       container.append(puzzleHtml);
@@ -121,9 +123,6 @@
 
       const boardElement = document.getElementById(`${puzzleId}-board`);
 
-      // Initialize the custom highlight layer
-      createHighlightLayer(boardElement, index);
-
       const config = {
         position: puzzleData.fen,
         orientation: orientation,
@@ -137,6 +136,9 @@
         },
         responsive: true,
         animationDuration: 300,
+        extensions: [
+          { class: window.Markers, props: { autoMarkers: null } }, // Disable auto markers, we'll handle them manually
+        ],
       };
 
       puzzleState.board = new Chessboard(boardElement, config);
@@ -260,7 +262,14 @@
 
     // Animate board reset to branch point
     state.board.setPosition(branchPointFen, true).then(() => {
-      clearHighlights(puzzleIndex);
+      // Clear all markers
+      try {
+        state.board.removeMarkers(goodMarker);
+        state.board.removeMarkers(badMarker);
+        state.board.removeMarkers(checkMarker);
+      } catch (e) {
+        console.error("Failed to remove markers:", e);
+      }
       updateBranchInfo(puzzleIndex);
       updateStatus(puzzleIndex, window.ChessWidget.t("nextBranch"));
 
@@ -304,12 +313,20 @@
           return false;
         }
         // Highlight the source square
-        highlightSquare(puzzleIndex, event.squareFrom, "highlight-source");
+        try {
+          state.board.addMarker(badMarker, event.squareFrom);
+        } catch (e) {
+          console.error("Failed to add marker:", e);
+        }
         return true;
 
       case "validateMoveInput":
         if (!event.squareTo) {
-          clearHighlights(puzzleIndex);
+          try {
+            state.board.removeMarkers(badMarker);
+          } catch (e) {
+            console.error("Failed to remove markers:", e);
+          }
           return false;
         }
         return processMove(puzzleIndex, event.squareFrom, event.squareTo);
@@ -327,7 +344,11 @@
         return true;
 
       case "moveInputCanceled":
-        clearHighlights(puzzleIndex);
+        try {
+          state.board.removeMarkers(badMarker);
+        } catch (e) {
+          console.error("Failed to remove markers:", e);
+        }
         state.waitingForOpponent = false;
         return true;
 
@@ -339,7 +360,14 @@
   function processMove(puzzleIndex, source, target) {
     const state = window.ChessWidget.Puzzles[puzzleIndex];
 
-    clearHighlights(puzzleIndex);
+    // Clear all markers
+    try {
+      state.board.removeMarkers(goodMarker);
+      state.board.removeMarkers(badMarker);
+      state.board.removeMarkers(checkMarker);
+    } catch (e) {
+      console.error("Failed to remove markers:", e);
+    }
 
     const moveObj = { from: source, to: target, promotion: "q" };
     const move = state.game.move(moveObj);
@@ -356,12 +384,22 @@
       state.currentMoveIdx++;
 
       // Highlight the valid move (From and To)
-      highlightMove(puzzleIndex, source, target);
+      try {
+        state.board.addMarker(goodMarker, source);
+        state.board.addMarker(goodMarker, target);
+      } catch (e) {
+        console.error("Failed to add markers:", e);
+      }
 
       if (state.game.in_checkmate()) {
         const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-        if (kingSquare)
-          highlightSquare(puzzleIndex, kingSquare, "highlight-check");
+        if (kingSquare) {
+          try {
+            state.board.addMarker(checkMarker, kingSquare);
+          } catch (e) {
+            console.error("Failed to add check marker:", e);
+          }
+        }
 
         if (state.currentMoveIdx >= state.solution.length) {
           // Branch/puzzle complete with checkmate
@@ -399,8 +437,13 @@
 
       if (state.game.in_check()) {
         const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-        if (kingSquare)
-          highlightSquare(puzzleIndex, kingSquare, "highlight-check");
+        if (kingSquare) {
+          try {
+            state.board.addMarker(checkMarker, kingSquare);
+          } catch (e) {
+            console.error("Failed to add check marker:", e);
+          }
+        }
       }
 
       if (state.currentMoveIdx >= state.solution.length) {
@@ -437,7 +480,14 @@
     } else {
       updateStatus(puzzleIndex, window.ChessWidget.t("wrongMove"), "error");
       state.game.undo();
-      clearHighlights(puzzleIndex);
+      // Clear all markers
+      try {
+        state.board.removeMarkers(goodMarker);
+        state.board.removeMarkers(badMarker);
+        state.board.removeMarkers(checkMarker);
+      } catch (e) {
+        console.error("Failed to remove markers:", e);
+      }
       setTimeout(() => {
         try {
           state.board.setPosition(state.game.fen(), false);
@@ -460,13 +510,27 @@
     state.board
       .setPosition(state.game.fen(), true)
       .then(() => {
-        clearHighlights(puzzleIndex);
-        highlightMove(puzzleIndex, fromSq, toSq);
+        // Clear all markers
+        try {
+          state.board.removeMarkers(goodMarker);
+          state.board.removeMarkers(badMarker);
+          state.board.removeMarkers(checkMarker);
+          // Highlight opponent's move
+          state.board.addMarker(goodMarker, fromSq);
+          state.board.addMarker(goodMarker, toSq);
+        } catch (e) {
+          console.error("Failed to update markers:", e);
+        }
 
         if (state.game.in_checkmate()) {
           const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-          if (kingSquare)
-            highlightSquare(puzzleIndex, kingSquare, "highlight-check");
+          if (kingSquare) {
+            try {
+              state.board.addMarker(checkMarker, kingSquare);
+            } catch (e) {
+              console.error("Failed to add check marker:", e);
+            }
+          }
           state.currentMoveIdx++;
 
           // Check if more branches to solve
@@ -497,8 +561,13 @@
 
         if (state.game.in_check()) {
           const kingSquare = getKingSquare(puzzleIndex, state.game.turn());
-          if (kingSquare)
-            highlightSquare(puzzleIndex, kingSquare, "highlight-check");
+          if (kingSquare) {
+            try {
+              state.board.addMarker(checkMarker, kingSquare);
+            } catch (e) {
+              console.error("Failed to add check marker:", e);
+            }
+          }
         }
 
         state.currentMoveIdx++;
@@ -539,58 +608,8 @@
     return userMove === expectedMove;
   }
 
-  // --- CUSTOM HIGHLIGHTING SYSTEM ---
-
-  function createHighlightLayer(boardElement, index) {
-    // Create a dedicated div for highlights that sits on top of the board
-    const layerId = `highlight-layer-${index}`;
-    if (document.getElementById(layerId)) return;
-
-    const layer = document.createElement("div");
-    layer.id = layerId;
-    layer.className = "custom-highlight-layer";
-    boardElement.appendChild(layer);
-  }
-
-  function highlightSquare(puzzleIndex, square, cssClass) {
-    const state = window.ChessWidget.Puzzles[puzzleIndex];
-    const layer = document.getElementById(`highlight-layer-${puzzleIndex}`);
-    if (!layer || !square) return;
-
-    // Calculate position
-    const fileMap = { a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7 };
-    const file = fileMap[square.charAt(0)];
-    const rank = parseInt(square.charAt(1)) - 1; // 0-7
-
-    let top, left;
-
-    if (state.orientation === "white") {
-      left = file * 12.5;
-      top = (7 - rank) * 12.5;
-    } else {
-      left = (7 - file) * 12.5;
-      top = rank * 12.5;
-    }
-
-    const div = document.createElement("div");
-    div.className = `custom-highlight-square ${cssClass}`;
-    div.style.left = `${left}%`;
-    div.style.top = `${top}%`;
-
-    layer.appendChild(div);
-  }
-
-  function highlightMove(puzzleIndex, from, to) {
-    highlightSquare(puzzleIndex, from, "highlight-move");
-    highlightSquare(puzzleIndex, to, "highlight-move");
-  }
-
-  function clearHighlights(puzzleIndex) {
-    const layer = document.getElementById(`highlight-layer-${puzzleIndex}`);
-    if (layer) {
-      layer.innerHTML = "";
-    }
-  }
+  // --- MARKER HELPER FUNCTIONS ---
+  // Using chessboard.js built-in marker system
 
   function getKingSquare(puzzleIndex, color) {
     const state = window.ChessWidget.Puzzles[puzzleIndex];
